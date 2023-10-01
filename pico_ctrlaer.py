@@ -23,7 +23,7 @@ def mux(progs):
             times[i] -= min_time
 
 def ticks(time):
-    return round(time * FREQ)
+    return time * FREQ // 1000
 
 def run(progs, sm_number, base_pin):
     n_pins = len(progs)
@@ -52,4 +52,4 @@ def run(progs, sm_number, base_pin):
 
     for state, length in prog:
         p(state)
-        p(length)
+        p(ticks(length))
