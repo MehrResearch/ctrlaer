@@ -5,44 +5,51 @@ ON = const(1)
 OFF = const(0)
 FREQ = const(108_050)
 
-@asm_pio(sideset_init=(PIO.OUT_LOW,))
-def oscillator():
-    label("top")
-    irq(rel(0))
-    # First value: 0: delay, 1: square wave
-    pull()
-    mov(x, osr)
-    # Second value: duration in ticks (1 tick = 1/FREQ s)
-    pull()
-    mov(y, osr)
 
-    jmp(not_x, "delay")
-    label("loop")
-    nop().side(1)
-    jmp(y_dec, "loop").side(0)
-    jmp("top")
-    
-    label("delay")
-    nop()
-    jmp(y_dec, "delay")
-
-class Piezo:
-    def __init__(self, sm, pin):
-        self.sm = StateMachine(sm, oscillator, freq=FREQ*2, sideset_base=Pin(pin))
-        self.sm.irq(self._irq)
-    
-    def run(self, prog):
-        self.sm.active(1)
-        self.prog = prog()
-    
-    def _irq(self, sm):
-        try:
-            state, length = next(self.prog)
-            self.sm.put(state)
-            self.sm.put(length)
-        except StopIteration:
-            self.sm.active(0)
+def mux(progs):
+    N = len(progs)
+    times = [0] * N
+    val = 0
+    while True:
+        for i, prog in enumerate(progs):
+            if times[i] == 0:
+                cmd = next(prog)
+                val &= ~(1 << i)
+                val |= cmd[0] << i
+                times[i] = cmd[1]
+        min_time = min(times)
+        yield val, min_time
+        for i in range(N):
+            times[i] -= min_time
 
 def ticks(time):
     return round(time * FREQ)
 
+def run(progs, sm_number, base_pin):
+    n_pins = len(progs)
+    prog = mux(progs)
+
+    @asm_pio(out_init=(PIO.OUT_LOW,)*n_pins, out_shiftdir=PIO.SHIFT_RIGHT, fifo_join=PIO.JOIN_TX)
+    def oscillator():
+        pull() # pin states
+        mov(x, osr)
+
+        out(pins, n_pins)[4]
+        out(pins, n_pins)
+
+        pull() # duration in ticks (1 tick = 1/FREQ s)
+        mov(y, osr)
+
+        label("loop")
+        mov(osr, x)[1]
+        out(pins, n_pins)[4]
+        out(pins, n_pins)
+        jmp(y_dec, "loop")[1]
+
+    sm = StateMachine(sm_number, oscillator, freq=FREQ*2*5, out_base=Pin(base_pin))
+    sm.active(1)
+    p = sm.put
+
+    for state, length in prog:
+        p(state)
+        p(length)

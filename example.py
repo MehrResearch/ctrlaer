@@ -1,7 +1,4 @@
-from pico_ctrlaer import ticks, ON, OFF, Piezo
-
-pins = [25, 14, 3]
-piezos = [Piezo(i, p) for i, p in enumerate(pins)]
+from pico_ctrlaer import ticks, ON, OFF, run
 
 def prog1():
     for _ in range(200):
@@ -20,6 +17,4 @@ def prog3():
         yield ON, ticks(0.10)
         yield OFF, ticks(0.13)  
 
-piezos[0].run(prog1)
-piezos[1].run(prog2)
-piezos[2].run(prog3)
+run([prog1(), prog2()], 0, 0)
