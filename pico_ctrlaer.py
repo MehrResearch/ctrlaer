@@ -8,16 +8,24 @@ FREQ = const(108_050)
 
 def mux(progs):
     N = len(progs)
+    default = OFF, 1000
     times = [0] * N
     val = 0
     while True:
+        alive = 0
         for i, prog in enumerate(progs):
             if times[i] == 0:
-                cmd = next(prog)
+                try:
+                    cmd = next(prog)
+                    alive += 1
+                except StopIteration:
+                    cmd = default
                 val &= ~(1 << i)
                 val |= cmd[0] << i
                 times[i] = cmd[1]
         min_time = min(times)
+        if not alive:
+            break
         yield val, min_time
         for i in range(N):
             times[i] -= min_time
@@ -53,3 +61,4 @@ def run(progs, sm_number, base_pin):
     for state, length in prog:
         p(state)
         p(ticks(length))
+    sm.active(0)
