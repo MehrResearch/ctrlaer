@@ -5,6 +5,17 @@ ON = const(1)
 OFF = const(0)
 FREQ = const(108_050)
 
+def _always_on():
+    while True:
+        yield ON, 1000
+
+def _inactive():
+    # Yielding once is enough: mux() yields OFF when the generator is exhausted.
+    # This guarantees that mux() terminates after the last active program.
+    yield OFF, 1000
+
+inactive = _inactive()
+always_on = _always_on()
 
 def mux(progs):
     N = len(progs)

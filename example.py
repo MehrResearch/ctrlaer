@@ -1,4 +1,4 @@
-from pico_ctrlaer import ticks, ON, OFF, run
+from pico_ctrlaer import ticks, ON, OFF, run, always_on, inactive
 
 def prog1():
     for _ in range(300):
@@ -17,4 +17,5 @@ def prog3():
         yield ON, 100
         yield OFF, 130
 
-run([prog1(), prog2(), prog1(), prog2(), prog1()], 0, 0)
+# Base pin compatible with Pimoroni Tiny RP2040
+run([prog1(), prog2(), prog1(), prog2(), prog1(), always_on, inactive], sm_number=0, base_pin=0)
