@@ -122,4 +122,4 @@ PIO_REGS = {
     "IRQ1": (0x138, IRQ_FIELDS),
 }
 
-pios = [struct(PIO_REGS, addr) for addr in PIO_BASE]
+pios = [struct(addr, PIO_REGS) for addr in PIO_BASE]
