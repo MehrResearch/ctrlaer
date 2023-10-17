@@ -44,32 +44,35 @@ def mux(progs):
 def ticks(time):
     return time * FREQ // 1000
 
-def run(progs, sm_number, base_pin):
-    n_pins = len(progs)
-    prog = mux(progs)
+class CtrlAer:
+    def __init__(self, sm_number, base_pin, n_pins, freq=FREQ):
+        self.n_pins = n_pins
+        self.freq = freq
 
-    @asm_pio(out_init=(PIO.OUT_LOW,)*n_pins, out_shiftdir=PIO.SHIFT_RIGHT, fifo_join=PIO.JOIN_TX)
-    def oscillator():
-        pull() # pin states
-        mov(x, osr)
+        @asm_pio(out_init=(PIO.OUT_LOW,)*n_pins, out_shiftdir=PIO.SHIFT_RIGHT, fifo_join=PIO.JOIN_TX)
+        def oscillator():
+            pull() # pin states
+            mov(x, osr)
 
-        out(pins, n_pins)[4]
-        out(pins, n_pins)
+            out(pins, n_pins)[4]
+            out(pins, n_pins)
 
-        pull() # duration in ticks (1 tick = 1/FREQ s)
-        mov(y, osr)
+            pull() # duration in ticks (1 tick = 1/freq s)
+            mov(y, osr)
 
-        label("loop")
-        mov(osr, x)[1]
-        out(pins, n_pins)[4]
-        out(pins, n_pins)
-        jmp(y_dec, "loop")[1]
+            label("loop")
+            mov(osr, x)[1]
+            out(pins, n_pins)[4]
+            out(pins, n_pins)
+            jmp(y_dec, "loop")[1]
 
-    sm = StateMachine(sm_number, oscillator, freq=FREQ*2*5, out_base=Pin(base_pin))
-    sm.active(1)
-    p = sm.put
+        self.sm = StateMachine(sm_number, oscillator, freq=self.freq*2*5, out_base=Pin(base_pin))
+        self.sm.active(1)
 
-    for state, length in prog:
-        p(state)
-        p(ticks(length))
-    sm.active(0)
+    def run(self, prog):
+        put = self.sm.put
+        for state, length in prog:
+            put(state)
+            put(ticks(length))
+        put(OFF)
+        put(0)
