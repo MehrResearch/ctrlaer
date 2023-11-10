@@ -15,6 +15,15 @@ jobs:
       with:
         submodules: 'recursive'
 
+    - name: Get commit hash
+      id: commit_hash
+      run: echo "::set-output name=hash::$(git rev-parse --short HEAD)"
+
+    - name: Create VERSION file
+      run: |
+        echo "${{ github.ref }}" > VERSION
+        echo "${{ steps.commit_hash.outputs.hash }}" >> VERSION
+
     - name: Archive code
       run: |
         zip -r release.zip . -x ".*"
