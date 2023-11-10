@@ -17,7 +17,7 @@ jobs:
 
     - name: Archive code
       run: |
-        zip -r release.zip .
+        zip -r release.zip . -x ".*"
 
     - name: Create Release
       id: create_release
