@@ -1,9 +1,12 @@
 from machine import Pin
 from rp2 import PIO, asm_pio, StateMachine
 
+from rp2040hw.pio import pios, clkdiv
+
 ON = const(1)
 OFF = const(0)
 FREQ = const(108_050)
+RP2040_CLK = const(125_000_000)
 
 
 def _always_on():
@@ -46,14 +49,12 @@ def mux(progs):
             times[i] -= min_time
 
 
-def ticks(time):
-    return time * FREQ // 1000
-
-
 class CtrlAer:
     def __init__(self, sm_number, base_pin, n_pins, freq=FREQ):
         self.n_pins = n_pins
-        self.freq = freq
+        self._freq = freq
+        self.pio = pios[sm_number // 4]
+        self.sm = sm_number % 4
 
         @asm_pio(
             out_init=(PIO.OUT_LOW,) * n_pins,
@@ -77,14 +78,23 @@ class CtrlAer:
             jmp(y_dec, "loop")[1]
 
         self.sm = StateMachine(
-            sm_number, oscillator, freq=self.freq * 2 * 5, out_base=Pin(base_pin)
+            sm_number, oscillator, freq=self._freq * 2 * 5, out_base=Pin(base_pin)
         )
         self.sm.active(1)
+
+    def set_freq(self, freq):
+        self._freq = freq
+        i, f = clkdiv(freq * 2 * 5, RP2040_CLK)
+        self.pio.SM[self.sm].CLKDIV.INT = i
+        self.pio.SM[self.sm].CLKDIV.FRAC = f
+        
+    def ticks(self, time):
+        return time * self._freq // 1000
 
     def run(self, prog):
         put = self.sm.put
         for state, length in prog:
             put(state)
-            put(ticks(length))
+            put(self.ticks(length))
         put(OFF)
         put(0)
