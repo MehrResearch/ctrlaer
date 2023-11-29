@@ -54,7 +54,7 @@ class CtrlAer:
         self.n_pins = n_pins
         self._freq = freq
         self.pio = pios[sm_number // 4]
-        self.sm = sm_number % 4
+        self.sm_number = sm_number % 4
 
         @asm_pio(
             out_init=(PIO.OUT_LOW,) * n_pins,
@@ -85,8 +85,8 @@ class CtrlAer:
     def set_freq(self, freq):
         self._freq = freq
         i, f = clkdiv(freq * 2 * 5, RP2040_CLK)
-        self.pio.SM[self.sm].CLKDIV.INT = i
-        self.pio.SM[self.sm].CLKDIV.FRAC = f
+        self.pio.SM[self.sm_number].CLKDIV.INT = i
+        self.pio.SM[self.sm_number].CLKDIV.FRAC = f
         
     def ticks(self, time):
         return time * self._freq // 1000
