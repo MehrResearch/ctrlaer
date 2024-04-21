@@ -26,7 +26,7 @@ jobs:
 
     - name: Archive code
       run: |
-        zip -r pico_ctrlaer.zip . -x ".*"
+        zip -r ctrlaer.zip . -x ".*"
 
     - name: Create Release
       id: create_release
@@ -46,6 +46,6 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./pico_ctrlaer.zip
-        asset_name: pico_ctrlaer.zip
+        asset_path: ./ctrlaer.zip
+        asset_name: ctrlaer.zip
         asset_content_type: application/zip
