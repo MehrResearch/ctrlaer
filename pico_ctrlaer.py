@@ -1,5 +1,6 @@
 from machine import Pin
 from rp2 import PIO, asm_pio, StateMachine
+from time import sleep
 
 from rp2040hw.pio import pios, clkdiv
 
@@ -55,6 +56,8 @@ class CtrlAer:
         self._freq = freq
         self.pio = pios[sm_number // 4]
         self.sm_number = sm_number % 4
+        self.bit_mask = 1 << self.sm_number
+        self.sm_reg = self.pio.SM[self.sm_number]
 
         @asm_pio(
             out_init=(PIO.OUT_LOW,) * n_pins,
@@ -85,16 +88,28 @@ class CtrlAer:
     def set_freq(self, freq):
         self._freq = freq
         i, f = clkdiv(freq * 2 * 5, RP2040_CLK)
-        self.pio.SM[self.sm_number].CLKDIV.INT = i
-        self.pio.SM[self.sm_number].CLKDIV.FRAC = f
+        self.sm_reg.CLKDIV.INT = i
+        self.sm_reg.CLKDIV.FRAC = f
         
     def ticks(self, time):
         return time * self._freq // 1000
+    
+    def is_full(self):
+        return (self.pio.FSTAT.TXFULL & self.bit_mask) >> self.sm_number
+    
+    def is_empty(self):
+        return (self.pio.FSTAT.TXEMPTY & self.bit_mask) >> self.sm_number
+    
+    def block(self):
+        while True:
+            if self.is_empty():
+                break
+            sleep(0.001)
 
-    def run(self, prog):
+    def run(self, prog, block=True):
         put = self.sm.put
         for state, length in prog:
+            if not block and self.is_full():
+                return
             put(state)
             put(self.ticks(length))
-        put(OFF)
-        put(0)
