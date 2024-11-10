@@ -1,13 +1,19 @@
-from machine import Pin
+from machine import Pin, freq
 from rp2 import PIO, asm_pio, StateMachine
 from time import sleep
 
 from rp2040hw.pio import pios, clkdiv
 
-ON = const(1)
-OFF = const(0)
+PULSE10 = const(0b10)
+PULSE01 = const(0b01)
+PULSE11 = const(0b11)
+PULSE00 = const(0b00)
+HIGH = PULSE11
+LOW = PULSE00
+ON = PULSE10
+OFF = PULSE00
 FREQ = const(108_050)
-RP2040_CLK = const(125_000_000)
+RP_CLK = freq()
 
 
 def _always_on():
@@ -39,8 +45,9 @@ def mux(progs):
                     alive += 1
                 except StopIteration:
                     cmd = default
-                val &= ~(1 << i)
-                val |= cmd[0] << i
+                val &= ~((1 << i) + (1 << (N + i)))
+                val |= (cmd[0] % 2) << i
+                val |= (cmd[0] // 2) << (N + i)
                 times[i] = cmd[1]
         min_time = min(times)
         if not alive:
@@ -87,7 +94,7 @@ class CtrlAer:
 
     def set_freq(self, freq):
         self._freq = freq
-        i, f = clkdiv(freq * 2 * 5, RP2040_CLK)
+        i, f = clkdiv(freq * 2 * 5, RP_CLK)
         self.sm_reg.CLKDIV.INT = i
         self.sm_reg.CLKDIV.FRAC = f
         
