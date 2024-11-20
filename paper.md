@@ -24,7 +24,29 @@ As an emerging medium for investigating chemical reactivity, aerosols offer acce
 
 # Statement of need
 
-`Gala` is an Astropy-affiliated Python package for galactic dynamics. Python
+`Ctrlaer` is an Micropython library targeting the Raspberry Pi RP2040 and RP2350 microcontrollers. It uses the microcontroller's programmable input/output (PIO) subsystem for signal generation, freeing up the processor to handle other tasks, such as event processing, or data logging. The RP2040 and RP2350 have two and three PIO units respectively, with each PIO unit consisting of four state machines using a shared clock signal. The PIO's built-in first-in-first-out (FIFO) allows gap-less signal generation, with as many as 16 general-purpose IO (GPIO) pins controllable by a single state machine.
+
+`CtrlAer`'s primary aim is to lower the barrier to entry for scientists and engineers looking to undertake experiments involving aerosols. Commercial vibrating mesh atomisers (VMAs) have provide a robust and inexpensive hardware option but their accessibility is currently limited by the lack of a software option for 
+
+Two types of signals are currently supported: square waves for driving VMAs and DC high/low signals for controlling other devices. Square wave frequency can be controlled on the PIO level, so two (RP2040) or three (RP2350) independent frequencies are possible. Frequency setup is possible both during setup via the `CtrlAer` constructor as well as in real-time by calling the `set_freq` method. The phase, i.e. `0101` vs `1010` of a square wave can further be specified on a per-pin basis.
+
+One of `CtrlAer`'s principal aims is to offer an abstraction over the low-level PIO mechanics by providing domain-specific constructs for generation of dirrent signal types. Each signal is represented as a Python generator, allowing instructions to be produced dynamically in response to measurements and without requiring the entire sequence to fit within the microcontroller's limited memory. The tuples yielded by each generator are of the form `<COMMAND> <DURATION>`, where `<DURATION>` is a time period specified by default in milliseconds. At runtime, the `<COMMAND>` along with `ticks` (i.e. the number of state machine cycles calculated based on `<DURATION>` and PIO frequency) are placed on the PIO state machine's FIFO sequentially as 32-bit values. `<COMMAND>` can be any of the following, Figure ?. 
+
+* **`OFF`:** Continuously low (0 V) signal level for duration of command. Binary representation: `00`.
+* **`PULSE10`:** Square wave beginning with high (3.3 V) signal level. Binary representation `10`.
+* **`PULSE01`:** Square wave beginning with low (0 V) signal level. Binary representation: `01`.
+* **`HIGH`:** Constant high (3.3 V) signal level. Binary representation: `11`.
+* **`ON`:** Alias for `PULSE10`. Binary representation: `10`.
+
+Internally, the state machine alternates between the `COMMAND`'s two bits, performing a single-bit right shift from the output shift register (OSR) to the pins, repeating this `ticks` times.
+
+The above per-pin constructs can be combined for synchronised control of any continuous range of GPIO pins through the use of another CtrlAer construct dubbed `mux`. Specifically, `mux` function takes a list of *N* generators, each corresponding to 1 GPIO pin and returns a combined generator capable of controlling a continuous range of *N* pins. Internally, `mux` interlaces the two state bits of each supplied command and calculates the next largest time window where all pin signals are valid, Figure ?.
+
+Some of CtrlAer's functionality is dependent on a sister library, `rp2040hw`, which maps most of the RP2040/RP2350's special function registers to Python data structures for low-level device control. `CtrlAer` specifically relies on access to PIO registers to manipulate a PIO's frequency without having to stop and restart it.
+
+Our testing shows that 
+
+Astropy-affiliated Python package for galactic dynamics. Python
 enables wrapping low-level languages (e.g., C) for speed without losing
 flexibility or ease-of-use in the user-interface. The API for `Gala` was
 designed to provide a class-based and user-friendly interface to fast (C or
@@ -43,46 +65,6 @@ visualizations of textbook material [@Binney:2008]. The combination of speed,
 design, and support for Astropy functionality in `Gala` will enable exciting
 scientific explorations of forthcoming data releases from the *Gaia* mission
 [@gaia] by students and experts alike.
-
-# Mathematics
-
-Single dollars ($) are required for inline mathematics e.g. $f(x) = e^{\pi/x}$
-
-Double dollars make self-standing equations:
-
-$$\Theta(x) = \left\{\begin{array}{l}
-0\textrm{ if } x < 0\cr
-1\textrm{ else}
-\end{array}\right.$$
-
-You can also use plain \LaTeX for equations
-\begin{equation}\label{eq:fourier}
-\hat f(\omega) = \int_{-\infty}^{\infty} f(x) e^{i\omega x} dx
-\end{equation}
-and refer to \autoref{eq:fourier} from text.
-
-# Citations
-
-Citations to entries in paper.bib should be in
-[rMarkdown](http://rmarkdown.rstudio.com/authoring_bibliographies_and_citations.html)
-format.
-
-If you want to cite a software repository URL (e.g. something on GitHub without a preferred
-citation) then you can do it with the example BibTeX entry below for @fidgit.
-
-For a quick reference, the following citation commands can be used:
-- `@author:2001`  ->  "Author et al. (2001)"
-- `[@author:2001]` -> "(Author et al., 2001)"
-- `[@author1:2001; @author2:2001]` -> "(Author1 et al., 2001; Author2 et al., 2002)"
-
-# Figures
-
-Figures can be included like this:
-![Caption for example figure.\label{fig:example}](figure.png)
-and referenced from text using \autoref{fig:example}.
-
-Figure sizes can be customized by adding an optional second parameter:
-![Caption for example figure.](figure.png){ width=20% }
 
 # Acknowledgements
 
