@@ -1,11 +1,13 @@
 ---
-title: 'CtrlAer: A Micropython package and embedded domain specific language for real-time control of piezoelectric atomisers'
+title: 'CtrlAer: A MicroPython package and embedded domain specific language for real-time control of piezoelectric atomisers'
 tags:
   - Python
   - aerosols
   - piezoelectric
-  - 
-  - milky way
+  - embedded system
+  - microcontrollers
+  - Raspberry Pi Pico
+
 authors:
   - name: S. Hessam M. Mehr
     orcid: 0000-0001-7710-3102
@@ -14,7 +16,7 @@ affiliations:
  - name: Leverhulme Early Career Fellow, University of Glasgow, United Kingdom
    index: 1
    ror: 00vtgdb53
-date: 17 November 2024
+date: 23 November 2024
 bibliography: paper.bib
 ---
 
