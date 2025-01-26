@@ -1,4 +1,4 @@
-from pico_ctrlaer import mux, HIGH, LOW, CtrlAer
+from ctrlaer import mux, HIGH, LOW, CtrlAer
 
 def phase1(n_steps):
     for i in range(n_steps):

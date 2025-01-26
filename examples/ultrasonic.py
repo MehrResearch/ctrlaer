@@ -1,4 +1,4 @@
-from pico_ctrlaer import mux, HIGH, LOW, OFF, PULSE01, PULSE10, CtrlAer
+from ctrlaer import mux, HIGH, LOW, OFF, PULSE01, PULSE10, CtrlAer
 
 
 def low_freq():
