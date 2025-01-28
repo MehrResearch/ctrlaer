@@ -1,4 +1,4 @@
-from pico_ctrlaer import ON, OFF, mux, CtrlAer
+from ctrlaer import ON, OFF, mux, CtrlAer
 from machine import Pin
 from time import sleep
 
