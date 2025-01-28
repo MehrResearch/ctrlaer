@@ -28,7 +28,7 @@ Simply download the latest release .zip file from the [releases](https://github.
 Here's a simple example that alternates two pins:
 
 ```python
-from pico_ctrlaer import mux, ON, OFF, CtrlAer
+from ctrlaer import mux, ON, OFF, CtrlAer
 # ON: Square wave with 50% duty cycle at frequency `freq`
 # (see `CtrlAer` constructor); OFF and LOW are synonymous.
 
