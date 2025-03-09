@@ -1,5 +1,7 @@
 # CtrlAer
 
+[![DOI](https://zenodo.org/badge/690546753.svg)](https://doi.org/10.5281/zenodo.14763862)
+
 A MicroPython library for programmable real-time execution of scientific experiments on Raspberry Pi Pico. CtrlAer enables synchronized operation of multiple hardware devices through a simple, yet powerful domain-specific language.
 
 ## Overview
