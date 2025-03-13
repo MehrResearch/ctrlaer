@@ -43,8 +43,4 @@ nav:
   - Home: index.md
   - Getting started: getting-started.md
   - API reference: api-reference.md
-  - Examples:
-    - Overview: examples/index.md
-    - Stepper motor: examples/stepper.md
-    - Ultrasonic control: examples/ultrasonic.md
-    - Blocking operations: examples/blocking.md 
+  - Examples: examples.md
