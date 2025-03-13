@@ -119,4 +119,4 @@ def infinite_pattern():
         yield OFF, 100
 ```
 
-See the [API Reference](api-reference.md) for detailed documentation of all features. 
+See the [API Reference](api-reference.md) for detailed documentation of all features.
