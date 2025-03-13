@@ -9,7 +9,7 @@ reaction_delay = 1
 off_time = 250
 on_time = 100
 
-ctrlaer = CtrlAer(sm_number=0, base_pin=7, n_pins=2,freq=111_500)
+ctrlaer = CtrlAer(sm_number=0, base_pin=7, n_pins=2, freq=111_500)
 
 air_control = Pin(16, Pin.OUT)
 air_control.value(0)

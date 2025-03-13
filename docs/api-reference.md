@@ -38,19 +38,25 @@ Main controller class for PIO-based timing control.
 #### Constructor
 
 ```python
-CtrlAer(sm_number, base_pin, n_pins, freq=FREQ)
+CtrlAer(sm_number=0, base_pin=0, n_pins=1, freq=FREQ)
 ```
 
 **Parameters:**
 - `sm_number` (int): PIO state machine number (0-7 on RP2040, 0-11 on RP2350)
-- `base_pin` (int): First GPIO pin number
-- `n_pins` (int): Number of pins to control
+- `base_pin` (int): First GPIO pin number to use for output
+- `n_pins` (int): Number of consecutive pins to control
 - `freq` (int, optional): Frequency in Hz for square wave generation. Defaults to 108,050 Hz.
 
 **Notes:**
 - State machines are grouped into PIO blocks (0-3, 4-7, 8-11)
 - All state machines in the same PIO block share the same frequency
 - Each PIO block can have its own frequency
+
+**Example:**
+```python
+# Control 2 pins (GP5 and GP6) using state machine 1 at 40 kHz
+controller = CtrlAer(sm_number=1, base_pin=5, n_pins=2, freq=40000)
+```
 
 #### Methods
 
@@ -64,7 +70,7 @@ Runs a program on the PIO state machine.
 
 **Example:**
 ```python
-controller = CtrlAer(0, 0, 2)
+controller = CtrlAer(sm_number=0, base_pin=0, n_pins=2)
 controller.run(my_program())
 ```
 
@@ -89,6 +95,55 @@ Changes the square wave frequency for the PIO block containing this state machin
 **Example:**
 ```python
 controller.set_freq(20000)  # Set to 20kHz
+```
+
+##### `listen(io)`
+
+Reads commands from an input stream and executes them in real-time.
+
+**Parameters:**
+- `io`: Input stream object with a `readline()` method (e.g., `sys.stdin` or `io.BytesIO`)
+
+**Command format:**
+- Each line should be in the format `<state>,<duration>` where:
+  - `state`: Integer corresponding to pin state constants
+    - For single pin: 0=OFF/LOW (0b00), 1=PULSE01 (0b01), 2=ON/PULSE10 (0b10), 3=HIGH (0b11)
+    - For multiple pins: binary pattern where each 2 bits represent a pin state
+  - `duration`: Time in milliseconds
+- Special command `END` terminates the listening session
+
+**Example with single pin:**
+```python
+from io import BytesIO
+from sys import stdin
+
+# Create controller for 1 pin
+controller = CtrlAer(sm_number=0, base_pin=0, n_pins=1)
+
+# Using BytesIO for testing
+commands = BytesIO(b"0,100\n2,200\n3,150\nEND\n")
+controller.listen(commands)
+
+# Or using stdin for serial communication
+# controller.listen(stdin)
+```
+
+**Example with multiple pins:**
+```python
+from io import BytesIO
+
+# Create controller for 3 pins (GP0, GP1, GP2)
+controller = CtrlAer(sm_number=0, base_pin=0, n_pins=3)
+
+# Command for 3 pins: binary pattern 0b011100 (decimal 28)
+# Pin 0 (rightmost 2 bits): 00 = OFF
+# Pin 1 (middle 2 bits): 11 = HIGH
+# Pin 2 (leftmost 2 bits): 01 = PULSE01
+commands = BytesIO(b"28,250\n63,100\n57,100\nEND\n")
+# 28,250 (0b011100): PULSE01-HIGH-OFF for 250 ms
+# 63,100 (0b111111): HIGH-HIGH-HIGH for 100 ms
+# 57,80 (0b110101): HIGH-PULSE10-PULSE01 for 80 ms
+controller.listen(commands)
 ```
 
 ##### `ticks(time)`
@@ -133,4 +188,4 @@ The library uses a PIO program that:
 3. Pulls duration from FIFO
 4. Sets outputs to one or the other state for the specified duration
 
-For square wave states (PULSE10/PULSE01), the output toggles at the frequency specified in the CtrlAer constructor. 
+For square wave states (PULSE10/PULSE01), the output toggles at the frequency specified in the CtrlAer constructor.
