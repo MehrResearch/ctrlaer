@@ -120,3 +120,18 @@ class CtrlAer:
                 return
             put(state)
             put(self.ticks(length))
+    
+    def listen(self, io):
+        def fn():
+            while(True):
+                line = io.readline().strip()
+                if line == b'END':
+                    break
+                if not line:
+                    continue
+                cmd, duration = line.split(',')
+                cmd = int(cmd)
+                duration = int(duration)
+                yield cmd, duration
+                print(f'{cmd},{duration}')
+        self.run(fn())
