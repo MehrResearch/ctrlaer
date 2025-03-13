@@ -55,14 +55,16 @@ Check out the [Getting Started](getting-started.md) guide for more detailed info
 
 ## Citing CtrlAer
 
-If you use CtrlAer in a scientific publication, please cite the following paper:
+If you use CtrlAer in a scientific publication, please cite the [associated paper](https://doi.org/10.36227/techrxiv.173896967.76043093/v1) (DOI: 10.36227/techrxiv.173896967.76043093/v1):
 
 ```bibtex
 @article{mehr2025ctrlaer,
     title={Programmable real-time execution of scientific experiments using a domain specific language for the Raspberry Pi Pico},
     author={Mehr, S. Hessam M.},
-    journal={},
+    journal={TechrXiv},
     year={2025},
-    publisher={}
+    url={http://dx.doi.org/10.36227/techrxiv.173896967.76043093/v1},
+    DOI={10.36227/techrxiv.173896967.76043093/v1},
+    publisher={Institute of Electrical and Electronics Engineers (IEEE)}
 }
 ```
