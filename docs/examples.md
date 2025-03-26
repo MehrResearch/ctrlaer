@@ -297,3 +297,57 @@ ser.close()
 - Raspberry Pi Pico connected via USB to host computer
 - Output devices connected to GP0 (adjust as needed)
 - No additional components required for basic operation
+
+## Timing Control Options
+
+This example demonstrates how to control timing using either milliseconds (default) or raw PIO clock ticks for precise control over period count.
+
+### Code
+
+```python
+from ctrlaer import ON, OFF, CtrlAer
+from time import sleep
+
+FREQ = 100_000  # 100 kHz
+ctrlaer = CtrlAer(sm_number=0, base_pin=7, n_pins=1, freq=FREQ)
+
+def step_ms():
+    # Use millisecond timing (default)
+    for _ in range(5):
+        yield ON, 200    # 200 ms square wave
+        yield OFF, 200   # 200 ms off
+
+ctrlaer.run(step_ms())  # use_ms=True by default
+
+def step_ticks():
+    # Specify in ticks (square wave counts)
+    # 20000 ticks = 20000 * 1 / FREQ = 200 ms
+    for _ in range(5):
+        yield ON, 20000   # 20000 ticks square wave (200 ms)
+        yield OFF, 20000  # 20000 ticks off (200 ms)
+
+ctrlaer.run(step_ticks(), use_ms=False)  # Explicitly specify raw ticks
+```
+
+### How it works
+
+#### Timing options
+- `use_ms=True` (default): Timing specified in milliseconds
+  - Intuitive for human-readable code
+  - CtrlAer automatically converts to appropriate number of ticks
+  
+- `use_ms=False`: Timing specified in raw PIO clock ticks
+  - Precise control over exact number of PIO cycles
+  - Allows defining signals in terms of period count rather than duration
+
+#### Use cases
+- Use milliseconds for:
+  - Most general-purpose applications
+  - When timing is conceptualized in terms of real-world duration
+  - More readable and maintainable code
+
+- Use raw ticks for:
+  - Applications where the exact number of cycles matters
+  - Synchronizing with external hardware that operates on cycle counts
+  - Creating precise frequency relationships where ratios of ticks matter more than absolute time
+  - When working with very fast signals where rounding to milliseconds would cause timing errors

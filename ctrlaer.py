@@ -113,17 +113,25 @@ class CtrlAer:
                 break
             sleep(0.001)
 
-    def run(self, prog, block=True):
+    def run(self, prog, block=True, use_ms=True):
+        """Execute a program on the CtrlAer.
+        
+        Args:
+            prog: An iterable yielding (state, duration) tuples
+            block: If True, blocks until FIFO has space; if False, returns when FIFO is full
+            use_ms: If True, interpret durations as milliseconds; if False, interpret as raw PIO ticks
+        """
         put = self.sm.put
+        unit = self.ticks if use_ms else lambda x: x
         for state, length in prog:
             if not block and self.is_full():
                 return
             put(state)
-            put(self.ticks(length))
+            put(unit(length))
     
     def listen(self, io):
         def fn():
-            while(True):
+            while True:
                 line = io.readline().strip()
                 if line == b'END':
                     break
