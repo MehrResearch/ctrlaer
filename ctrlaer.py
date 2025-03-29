@@ -99,7 +99,7 @@ class CtrlAer:
         self.sm_reg.CLKDIV.FRAC = f
         
     def ticks(self, time):
-        return time * self._freq // 1000
+        return int(time * self._freq) // 1000
     
     def is_full(self):
         return (self.pio.FSTAT.TXFULL & self.bit_mask) >> self.sm_number
