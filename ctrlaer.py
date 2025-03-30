@@ -72,29 +72,33 @@ class CtrlAer:
             fifo_join=PIO.JOIN_TX,
         )
         def oscillator():
+            label("start")
             pull()  # pin states
             mov(x, osr)
 
-            out(pins, n_pins)[4]
+            out(pins, n_pins)[6]
             out(pins, n_pins)
 
             pull()  # duration in ticks (1 tick = 1/freq s)
             mov(y, osr)
+            jmp(y_dec, "loop")
+            jmp("start")
 
             label("loop")
-            mov(osr, x)[1]
-            out(pins, n_pins)[4]
-            out(pins, n_pins)
-            jmp(y_dec, "loop")[1]
+            mov(osr, x)[2]
+            out(pins, n_pins)[6]
+            out(pins, n_pins)[2]
+            jmp(y_dec, "loop")
+            nop()
 
         self.sm = StateMachine(
-            sm_number, oscillator, freq=self._freq * 2 * 5, out_base=Pin(base_pin)
+            sm_number, oscillator, freq=self._freq * 2 * 7, out_base=Pin(base_pin)
         )
         self.sm.active(1)
 
     def set_freq(self, freq):
         self._freq = freq
-        i, f = clkdiv(freq * 2 * 5, RP_CLK)
+        i, f = clkdiv(freq * 2 * 7, RP_CLK)
         self.sm_reg.CLKDIV.INT = i
         self.sm_reg.CLKDIV.FRAC = f
         
@@ -127,7 +131,7 @@ class CtrlAer:
             if not block and self.is_full():
                 return
             put(state)
-            put(unit(length))
+            put(unit(length) - 1)
     
     def listen(self, io):
         def fn():
