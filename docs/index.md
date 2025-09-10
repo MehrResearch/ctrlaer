@@ -55,16 +55,20 @@ Check out the [Getting Started](getting-started.md) guide for more detailed info
 
 ## Citing CtrlAer
 
-If you use CtrlAer in a scientific publication, please cite the [associated paper](https://doi.org/10.36227/techrxiv.173896967.76043093/v1) (DOI: 10.36227/techrxiv.173896967.76043093/v1):
+If you use CtrlAer in a scientific publication, please cite the [associated paper](https://doi.org/10.1016/j.softx.2025.102175) (DOI: 10.1016/j.softx.2025.102175):
 
 ```bibtex
-@article{mehr2025ctrlaer,
-    title={Programmable real-time execution of scientific experiments using a domain specific language for the Raspberry Pi Pico},
-    author={Mehr, S. Hessam M.},
-    journal={TechrXiv},
-    year={2025},
-    url={http://dx.doi.org/10.36227/techrxiv.173896967.76043093/v1},
-    DOI={10.36227/techrxiv.173896967.76043093/v1},
-    publisher={Institute of Electrical and Electronics Engineers (IEEE)}
+@article{Mehr2025CtrlAer,
+title = {CtrlAer: Programmable real-time execution of scientific experiments using a domain specific language for the Raspberry Pi Pico/Pico 2},
+journal = {SoftwareX},
+volume = {30},
+pages = {102175},
+year = {2025},
+issn = {2352-7110},
+doi = {https://doi.org/10.1016/j.softx.2025.102175},
+url = {https://www.sciencedirect.com/science/article/pii/S2352711025001426},
+author = {S.Hessam M. Mehr},
+keywords = {Raspberry Pi Pico, Automation, Signal generation, MicroPython, Microcontroller, Real-time, Domain-specific language},
+abstract = {Automated laboratory experimentation is increasingly dependent on synchronized operation of a heterogeneous hardware setups according to arbitrarily complex user-defined timing, but there is a lack of accessible, vendor-neutral options for reliable generation of these control signals. We present, CtrlAer, a domain-specific language for describing activation signals on a synchronized parallel timeline via a simple syntax containing only a handful of primitives. Embedded within MicroPython, CtrlAer programs are directly executable on the widely available and inexpensive Raspberry Pi Pico/Pico 2 and the wide ecosystem of open hardware development boards built around the RP2040/RP2350 microcontrollers. CtrlAer allows arbitrarily long and complex control sequences to be generated on up to 16 fully synchronized parallel channels at up to 10.7 MHz on the RP2350 (8.9 MHz on the RP2040), scaling to the needs of scientific experiments in a variety of disciplines.}
 }
 ```
