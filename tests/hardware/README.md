@@ -12,3 +12,12 @@ PIO/DMA probe confirmed signal generation remained operational.
 
 The internal probe uses the same oscillator as the output. These checks establish
 relative digital timing, not independent absolute frequency calibration.
+
+`python3 tools/board.py --port /dev/cu.usbmodem3101 --deploy
+tests/hardware/prepared_lifecycle.py` deploys the current modules and runs a check.
+The tool resets the interpreter and overwrites only `/lib/ctrlaer*.py` modules.
+It requires POSIX USB serial access and does not flash firmware.
+
+Prepared-runtime check on the same board: completion notification after 22136 us
+for a 21000 us timeline, successful rearming, abort to HIGH, wait-timeout to LOW,
+and an injected stopped-DMA feeder correctly reported as an underrun.

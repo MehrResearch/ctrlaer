@@ -3,7 +3,9 @@
 The signal primitives are also importable on CPython for offline validation.
 """
 from math import isfinite
-from time import sleep
+from time import sleep as _time_sleep
+from builtins import print as _builtin_print
+import sys
 
 try:
     from micropython import const
@@ -14,7 +16,6 @@ except ImportError:
 try:
     from machine import Pin, freq, mem32
     from rp2 import PIO, asm_pio, StateMachine
-    from rp2040hw.pio import pios, clkdiv
 except ImportError:
     Pin = None
 
@@ -28,6 +29,14 @@ ON = PULSE10
 OFF = PULSE00
 FREQ = const(108_050)
 RP_CLK = freq() if Pin is not None else None
+
+
+def _clock_divider(target, clock):
+    _duration(target)
+    if target == 0 or not 1 <= clock / target <= 65536:
+        raise ValueError("carrier frequency is outside the state machine clock range")
+    fixed = int(clock / target * 256)
+    return ((fixed >> 8) & 0xffff, fixed & 255)
 
 
 def _duration(value):
@@ -63,6 +72,7 @@ def mux(progs):
     progs = [iter(prog) for prog in progs]
     times = [0] * N
     done = [False] * N
+    states, durations, offsets = [0] * N, [0] * N, [0] * N
     val = 0
     while True:
         for i, prog in enumerate(progs):
@@ -72,21 +82,27 @@ def mux(progs):
                 except StopIteration:
                     done[i] = True
                     state, duration = OFF, 0
-                if not isinstance(state, int) or not 0 <= state <= 3:
-                    raise ValueError("channel state must be an integer from 0 to 3")
+                if not isinstance(state, _Carrier) and (not isinstance(state, int) or not 0 <= state <= 3):
+                    raise ValueError("channel state must be a CtrlAer signal command")
                 duration = _duration(duration)
+                states[i], durations[i], offsets[i] = state, duration, 0
                 val &= ~((1 << i) + (1 << (N + i)))
-                val |= (state & 1) << i
-                val |= (state >> 1) << (N + i)
+                if isinstance(state, int):
+                    val |= (state & 1) << i
+                    val |= (state >> 1) << (N + i)
                 times[i] = duration
         active_times = [times[i] for i in range(N) if not done[i]]
         if not active_times:
             return
         min_time = min(active_times)
-        yield val, min_time
+        if any(isinstance(state, _Carrier) for state in states):
+            yield _Parallel(tuple(_Signal(states[i], durations[i], offsets[i]) for i in range(N))), min_time
+        else:
+            yield val, min_time
         for i in range(N):
             if not done[i]:
                 times[i] -= min_time
+                offsets[i] += min_time
 
 
 class CtrlAer:
@@ -95,17 +111,40 @@ class CtrlAer:
             raise RuntimeError("CtrlAer execution requires MicroPython on an RP2040/RP2350")
         if not isinstance(n_pins, int) or not 1 <= n_pins <= 16:
             raise ValueError("n_pins must be between 1 and 16")
-        if not isinstance(sm_number, int) or not 0 <= sm_number < len(pios) * 4:
+        sm_count = 12 if "RP2350" in sys.implementation._machine else 8
+        if not isinstance(sm_number, int) or not 0 <= sm_number < sm_count:
             raise ValueError("invalid state machine number for this board")
         if not isinstance(base_pin, int) or not 0 <= base_pin <= 30 - n_pins:
             raise ValueError("output pins must fit within GPIO 0 to 29")
         self.n_pins = n_pins
         self._freq = freq
+        if _duration(freq) == 0:
+            raise ValueError("frequency must be positive")
+        self.base_pin, self._sm_id = base_pin, sm_number
         self.pio_index = sm_number // 4
-        self.pio = pios[sm_number // 4]
         self.sm_number = sm_number % 4
         self.bit_mask = 1 << self.sm_number
-        self.sm_reg = self.pio.SM[self.sm_number]
+        self._sm = None
+        self._prepared = None
+        self._legacy_program = None
+
+    @property
+    def sm(self):
+        if self._sm is None:
+            self._ensure_legacy()
+        return self._sm
+
+    @sm.setter
+    def sm(self, value):
+        self._sm = value
+
+    def _ensure_legacy(self):
+        if self._prepared is not None and not self._prepared.closed:
+            raise RuntimeError("close the prepared run before using streaming execution")
+        from ctrlaer_runtime import claim, release
+        _clock_divider(self._freq * 14, freq())
+        claim(self, self._sm_id, self.base_pin, self.n_pins)
+        n_pins = self.n_pins
 
         @asm_pio(
             out_init=(PIO.OUT_LOW,) * n_pins,
@@ -132,28 +171,49 @@ class CtrlAer:
             jmp(y_dec, "loop")
             nop()
 
-        self.sm = StateMachine(
-            sm_number, oscillator, freq=self._freq * 2 * 7, out_base=Pin(base_pin)
-        )
-        self._start_pc = mem32[0x502000d4 + (sm_number // 4) * 0x100000 + self.sm_number * 24]
-        self.sm.active(1)
+        try:
+            self._sm = StateMachine(self._sm_id, oscillator,
+                                    freq=int(self._freq * 14), out_base=Pin(self.base_pin))
+            self._legacy_program = oscillator
+            self._start_pc = mem32[0x502000d4 + self.pio_index * 0x100000 + self.sm_number * 24]
+            self._sm.active(1)
+        except Exception:
+            release(self)
+            raise
 
     def set_freq(self, freq):
-        i, f = clkdiv(freq * 2 * 7, globals()["freq"]())
+        if self._prepared is not None and not self._prepared.closed:
+            raise RuntimeError("prepared frequencies belong to the compiled program; prepare a new program")
+        if _duration(freq) == 0:
+            raise ValueError("frequency must be positive")
         address = 0x502000c8 + (self.pio_index * 0x100000) + self.sm_number * 24
-        mem32[address] = (i << 16) | (f << 8)
+        if self._sm is not None:
+            i, f = _clock_divider(freq * 14, globals()["freq"]())
+            mem32[address] = (i << 16) | (f << 8)
         self._freq = freq
         
     def ticks(self, time):
         return int(_duration(time) * self._freq / 1000)
     
     def is_full(self):
-        return (self.pio.FSTAT.TXFULL & self.bit_mask) >> self.sm_number
+        return bool(mem32[0x50200004 + self.pio_index * 0x100000] & (self.bit_mask << 16))
     
     def is_empty(self):
-        return (self.pio.FSTAT.TXEMPTY & self.bit_mask) >> self.sm_number
+        return bool(mem32[0x50200004 + self.pio_index * 0x100000] & (self.bit_mask << 24))
     
-    def block(self):
+    def block(self, timeout_ms=None):
+        if self._prepared is not None and not self._prepared.closed:
+            return self._prepared.wait(timeout_ms)
+        if self._sm is None:
+            return
+        if not self._sm.active():
+            if self.is_empty():
+                return
+            raise RuntimeError("cannot wait for queued data on a disabled state machine")
+        from time import ticks_ms, ticks_diff
+        if timeout_ms is not None and _duration(timeout_ms) == 0:
+            raise ValueError("timeout must be positive")
+        start = ticks_ms()
         # TXEMPTY becomes true as soon as the duration is loaded. Completion is
         # the next blocked state-word PULL, after the final duration has elapsed.
         debug = 0x50200008 + self.pio_index * 0x100000
@@ -161,7 +221,9 @@ class CtrlAer:
         mem32[debug] = self.bit_mask << 24
         while not (self.is_empty() and mem32[debug] & (self.bit_mask << 24)
                    and mem32[address] == self._start_pc):
-            sleep(0.001)
+            if timeout_ms is not None and ticks_diff(ticks_ms(), start) >= timeout_ms:
+                raise RuntimeError("streaming completion wait timed out")
+            _time_sleep(0.001)
 
     def run(self, prog, block=True, use_ms=True):
         """Execute a program on the CtrlAer.
@@ -180,7 +242,7 @@ class CtrlAer:
             if not block and self.sm.tx_fifo() > 6:
                 return prog
             try:
-                state, length = next(prog)
+                state, length = _advance(prog, self._stream_effect)
             except StopIteration:
                 return None
             if not isinstance(state, int) or not 0 <= state < (1 << (2 * self.n_pins)):
@@ -209,5 +271,64 @@ class CtrlAer:
                 cmd = int(cmd)
                 duration = int(duration)
                 yield cmd, duration
-                print(f'{cmd},{duration}')
+                _builtin_print(f'{cmd},{duration}')
         self.run(fn())
+
+    def prepare(self, program, **kwargs):
+        """Compile and arm a finite or explicitly bounded generator program."""
+        from ctrlaer_runtime import PreparedRun
+        if self._prepared is not None and not self._prepared.closed:
+            if self._prepared.active:
+                raise RuntimeError("abort or wait for the current run before preparing another")
+            self._prepared.close()
+        if self._sm is not None:
+            self.close()
+        self._prepared = PreparedRun(self, program, **kwargs)
+        return self._prepared
+
+    def start(self):
+        if self._prepared is None:
+            raise RuntimeError("prepare a program before starting")
+        return self._prepared.start()
+
+    def wait(self, timeout_ms=None):
+        if self._prepared is None:
+            return self.block(timeout_ms)
+        return self._prepared.wait(timeout_ms)
+
+    def abort(self):
+        if self._prepared is not None:
+            return self._prepared.abort()
+        if self._sm is not None:
+            self._sm.active(0)
+
+    def close(self):
+        if self._prepared is not None and not self._prepared.closed:
+            self._prepared.close()
+        if self._sm is not None:
+            from ctrlaer_runtime import release
+            self._sm.active(0)
+            PIO(self.pio_index).remove_program(self._legacy_program)
+            release(self)
+            self._sm = self._legacy_program = None
+
+    def _stream_effect(self, kind, value):
+        if kind == "wait":
+            raise RuntimeError("hardware wait_for commands require prepare(); the generator API is unchanged")
+        self.block()
+        if kind == "sleep":
+            _time_sleep(value)
+        elif kind == "print":
+            _builtin_print(value, end="")
+
+
+from ctrlaer_commands import pulse, chirp, sleep, print, wait_for, _Carrier, _Signal, _Parallel, _advance
+from ctrlaer_program import Trigger, compile_program
+from ctrlaer_capture import Trace, DigitalCapture
+
+
+class Group:
+    """Coordinate prepared runs; hardware imports remain deferred on CPython."""
+    def __new__(cls, runs):
+        from ctrlaer_runtime import PreparedGroup
+        return PreparedGroup(runs)

@@ -44,3 +44,6 @@ nav:
   - Getting started: getting-started.md
   - API reference: api-reference.md
   - Examples: examples.md
+  - Prepared execution: prepared-execution.md
+  - Triggers and waveform groups: triggers-and-groups.md
+  - Digital capture: digital-capture.md
