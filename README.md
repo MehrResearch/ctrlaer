@@ -2,11 +2,11 @@
 
 [![DOI](https://zenodo.org/badge/690546753.svg)](https://doi.org/10.5281/zenodo.14763862)
 
-A MicroPython library for programmable real-time execution of scientific experiments on Raspberry Pi Pico. CtrlAer enables synchronized operation of multiple hardware devices through a simple, yet powerful domain-specific language.
+A MicroPython library for programmable real-time execution of scientific experiments on Raspberry Pi Pico. CtrlAer enables synchronized operation of multiple hardware devices through a simple, yet powerful Python-based DSL.
 
 ## Overview
 
-CtrlAer is designed to lower the barrier to entry for scientists and engineers looking to undertake experiments involving synchronized activation of multiple devices. It can generate arbitrarily complex finite or infinite signal sequences on up to 16 synchronized parallel channels at up to 10 MHz.
+CtrlAer is designed to lower the barrier to entry for scientists and engineers looking to undertake experiments involving synchronized activation of multiple devices. It can generate arbitrarily complex timing patterns and control hardware with microsecond precision using the RP2040/RP2350 programmable I/O subsystem.
 
 ### Key Features
 
@@ -80,15 +80,17 @@ If you use CtrlAer in your research, please cite:
 
 ```bibtex
 @article{mehr2025ctrlaer,
-    title={Programmable real-time execution of scientific experiments using a domain specific language for the Raspberry Pi Pico},
+    title={CtrlAer: Programmable real-time execution of scientific experiments using a domain specific language for the Raspberry Pi Pico/Pico 2},
     author={Mehr, S. Hessam M.},
-    journal={},
+    journal={SoftwareX},
+    volume={30},
+    pages={102175},
     year={2025},
-    publisher={}
+    publisher={Elsevier},
+    doi={10.1016/j.softx.2025.102175}
 }
 ```
 
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
-
