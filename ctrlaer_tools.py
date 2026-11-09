@@ -30,7 +30,7 @@ def program_from_dict(data, words=None):
                                data["gates"], data["pulse_counts"], data["final_mask"],
                                quantisation, dict(data["parameters"]), bool(data["windowed"]),
                                requested, data.get("control_overhead_ticks", 0),
-                               data.get('events'), data.get('annotations'))
+                               data.get('events'), data.get('annotations'), _u32=True)
     return program.validate()
 
 

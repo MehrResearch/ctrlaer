@@ -68,8 +68,10 @@ class CompiledProgram:
     """Packed immutable-by-contract program, suitable for DMA and offline replay."""
     def __init__(self, words, clock_hz, n_pins, names, duration_ticks, gates,
                  pulse_counts, final_mask, quantisation_ns, parameters, windowed,
-                 requested_ticks=0, control_ticks=0, events=None, annotations=None):
+                 requested_ticks=0, control_ticks=0, events=None, annotations=None,
+                 _u32=False):
         self.words, self.clock_hz, self.n_pins = words, clock_hz, n_pins
+        self._u32 = _u32  # Compiler/decoder constructed a checked unsigned array.
         self.names, self.duration_ticks, self.gates = names, duration_ticks, gates
         self.pulse_counts, self.final_mask = pulse_counts, final_mask
         self.quantisation_ns, self.parameters, self.windowed = quantisation_ns, parameters, windowed
@@ -128,27 +130,33 @@ class CompiledProgram:
         integer(self.final_mask, "final_mask", 0, (1 << self.n_pins) - 1)
         if len(self.words) < 4 or len(self.words) % 2:
             raise ValueError("program needs complete command/delay packets")
-        for word in self.words:
-            integer(word, "packed word", 0, 0xffffffff)
+        if not self._u32:
+            for word in self.words:
+                integer(word, "packed word", 0, 0xffffffff)
         if self.words[-2] != IRQ_DONE or self.words[-1] != 0:
             raise ValueError("program must end with a completion instruction")
         final_tail = self.words[-3]
         if self.words[-4] != (OUT_PINS | self.n_pins | self.final_mask << 16) or not 0 <= final_tail < MIN_TICKS:
             raise ValueError("program must apply its final mask before completion")
         elapsed, gate_index, position, event_index = 0, 0, 0, 0
-        pulses, previous = [0] * self.n_pins, 0
+        from ctrlaer_native import _scan_outputs
+        pulses, previous = array('I', [0] * self.n_pins), 0
+        scan = array('I', [0, 0, 0, 0])
         control_ticks = 0
         while position < len(self.words) - 4:
             instruction = self.words[position] & 0xffff
             if instruction == OUT_PINS | self.n_pins:
-                mask = self.words[position] >> 16
-                integer(mask, "packed mask", 0, (1 << self.n_pins) - 1)
-                rising = mask & ~previous
-                for channel in range(self.n_pins):
-                    pulses[channel] += rising >> channel & 1
-                previous = mask
-                elapsed += self.words[position + 1] + MIN_TICKS
-                position += 2
+                if not self._u32:
+                    # Generic manually constructed sequences need a real u32
+                    # buffer before they can enter an unchecked native loop.
+                    self.words = array('I', self.words)
+                    self._u32 = True
+                scan[0], scan[1], scan[2] = elapsed & 0xffffffff, elapsed >> 32, previous
+                position = _scan_outputs(self.words, position, len(self.words) - 4,
+                                         self.n_pins, pulses, scan)
+                if scan[3]:
+                    raise ValueError('packed mask does not fit the configured channels')
+                elapsed, previous = scan[0] + (scan[1] << 32), scan[2]
                 continue
             if instruction != MOV_ISR_OSR or event_index >= len(self.events):
                 raise ValueError("unexpected PIO instruction in packed program")
@@ -185,7 +193,7 @@ class CompiledProgram:
             for channel in range(self.n_pins):
                 pulses[channel] += rising >> channel & 1
         if (elapsed + final_tail != self.duration_ticks or gate_index != len(self.gates)
-                or event_index != len(self.events) or pulses != self.pulse_counts):
+                or event_index != len(self.events) or list(pulses) != self.pulse_counts):
             raise ValueError("program statistics disagree with packed program")
         return self
 
@@ -290,10 +298,11 @@ class _Writer:
         return CompiledProgram(self.words, self.clock_hz, self.n_pins, names,
                                duration, self.gates, self.pulses, self.final_mask,
                                self.quantisation_ns, parameters, windowed,
-                               self.requested_ticks, self.control_ticks, self.events, self.annotations)
+                               self.requested_ticks, self.control_ticks, self.events, self.annotations,
+                               _u32=True)
 
 
-def _carrier_events(command, duration, offset, pin, clock_hz):
+def _analytic_carrier_events(command, duration, offset, pin, clock_hz):
     frequency = number(command.freq, "frequency", strict=True)
     end = frequency if command.end_freq is None else number(command.end_freq, "end frequency", strict=True)
     duty = number(command.duty, "duty", strict=True)
@@ -347,10 +356,81 @@ def _carrier_events(command, duration, offset, pin, clock_hz):
         cycle += 1
 
 
+def _carrier_events(command, duration, offset, pin, clock_hz):
+    # Validate with the portable analytic implementation before native code sees
+    # any parameters. Keep that implementation as an independent reference.
+    reference = _analytic_carrier_events(command, duration, offset, pin, clock_hz)
+    first = next(reference, None)
+    if first is None:
+        return
+    from ctrlaer_native import CarrierEdges, words
+    cursor = CarrierEdges.create(command, clock_hz, offset)
+    if cursor is None:
+        yield first
+        yield from reference
+        return
+    buffer = words(128)
+    level = 1
+    while True:
+        cursor.fill_into(buffer, len(buffer))
+        for tick in buffer:
+            absolute = (tick + cursor.origin) / clock_hz
+            if absolute >= duration:
+                return
+            yield absolute - offset, pin, level
+            level = 1 - level
+
+
+def _append_native(writer, cursor, total, offset, residual, first=1, second=0, initial=0):
+    """Bulk-copy validated native intervals; preserve the final pending hold."""
+    if not total:
+        return
+    from ctrlaer_native import words, _pack_edges, _scan_outputs
+    writer.flush()
+    budget = writer.max_words - len(writer.words) - 4
+    maximum_frequency = cursor.maximum_frequency
+    count = min(budget // 2 + 4, int(total * maximum_frequency * 2 / writer.clock_hz) + 8)
+    if count < 2:
+        raise ValueError('compiled program exceeds max_words; use a shorter bounded window')
+    ticks = words(count)
+    cursor.fill_into(ticks, count)
+    packed = words(count * 2)
+    config = array('I', [total, offset - cursor.origin, first, second, initial, 0, 0,
+                         OUT_PINS | writer.n_pins, rounded(residual) & 0xffffffff])
+    used = _pack_edges(ticks, count, packed, config)
+    if used == -1:
+        raise ValueError('an edge interval is shorter than %d clock ticks' % MIN_TICKS)
+    if used < 0 or used > budget:
+        raise ValueError('compiled program exceeds max_words; use a shorter bounded window')
+    pulses = array('I', writer.pulses)
+    scan = array('I', [0, 0, writer.last_mask, 0])
+    _scan_outputs(packed, 0, used, writer.n_pins, pulses, scan)
+    writer.words.extend(memoryview(packed)[:used])
+    writer.elapsed += scan[0] + (scan[1] << 32)
+    writer.last_mask, writer.pulses = scan[2], list(pulses)
+    writer.hold(config[5], config[6])
+    # This includes fixed-point approximation as well as tick rounding. It is
+    # a conservative bound, rather than an expensive per-edge float measurement.
+    writer.quantisation_ns = max(writer.quantisation_ns,
+                                 (1 + abs(residual)) * 1e9 / writer.clock_hz)
+
+
 def _parallel(writer, signals, length, seconds_per_unit, frequency, remaining):
     import heapq
     total_seconds = length * seconds_per_unit
     start_residual = writer.residual
+    if len(signals) == 1 and isinstance(signals[0].command, _Carrier):
+        signal = signals[0]
+        duration, offset = signal.duration * seconds_per_unit, signal.offset * seconds_per_unit
+        next(_analytic_carrier_events(signal.command, duration, offset, 0, writer.clock_hz), None)
+        from ctrlaer_native import CarrierEdges
+        cursor = CarrierEdges.create(signal.command, writer.clock_hz, offset)
+        if cursor is not None:
+            cursor.maximum_frequency = max(signal.command.freq,
+                                            signal.command.end_freq or signal.command.freq)
+            total = writer.duration(total_seconds * writer.clock_hz, remaining)
+            _append_native(writer, cursor, total, rounded(offset * writer.clock_hz), start_residual)
+            return total
     total = writer.duration(total_seconds * writer.clock_hz, remaining)
     heap, iterators, mask = [], [], 0
     for pin, signal in enumerate(signals):
@@ -464,6 +544,13 @@ class _Compiler:
         if first == second:
             writer.hold(first, total)
         else:
+            from ctrlaer_native import CarrierEdges
+            cursor = CarrierEdges.create(_Carrier(frequency, .5, 0, False, 0), writer.clock_hz)
+            if cursor is not None:
+                cursor.maximum_frequency = frequency
+                _append_native(writer, cursor, total, 0, 0, first, second, first)
+                self.consume(total)
+                return
             previous = 0
             for half in range(2 * count):
                 end = min(total, rounded((half + 1) * writer.clock_hz / (2 * frequency)))
