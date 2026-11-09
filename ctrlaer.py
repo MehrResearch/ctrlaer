@@ -1,8 +1,22 @@
-from machine import Pin, freq
-from rp2 import PIO, asm_pio, StateMachine
+"""CtrlAer signal primitives and the backwards-compatible streaming controller.
+
+The signal primitives are also importable on CPython for offline validation.
+"""
+from math import isfinite
 from time import sleep
 
-from rp2040hw.pio import pios, clkdiv
+try:
+    from micropython import const
+except ImportError:
+    def const(value):
+        return value
+
+try:
+    from machine import Pin, freq, mem32
+    from rp2 import PIO, asm_pio, StateMachine
+    from rp2040hw.pio import pios, clkdiv
+except ImportError:
+    Pin = None
 
 PULSE10 = const(0b10)
 PULSE01 = const(0b01)
@@ -13,7 +27,13 @@ LOW = PULSE00
 ON = PULSE10
 OFF = PULSE00
 FREQ = const(108_050)
-RP_CLK = freq()
+RP_CLK = freq() if Pin is not None else None
+
+
+def _duration(value):
+    if not isinstance(value, (int, float)) or not isfinite(value) or value < 0:
+        raise ValueError("duration must be a finite, non-negative number")
+    return value
 
 
 def _always_on():
@@ -32,35 +52,56 @@ always_on = _always_on()
 
 
 def mux(progs):
+    """Merge channel generators, keeping unfinished channels alive to their end.
+
+    Zero-length segments are skipped. Exhausted channels become LOW while other
+    channels continue. Each two-bit state occupies two *bit planes* in the result.
+    """
     N = len(progs)
-    default = OFF, 1000
+    if not 1 <= N <= 16:
+        raise ValueError("mux needs 1 to 16 channels")
+    progs = [iter(prog) for prog in progs]
     times = [0] * N
+    done = [False] * N
     val = 0
     while True:
-        alive = 0
         for i, prog in enumerate(progs):
-            if times[i] == 0:
+            while not done[i] and times[i] == 0:
                 try:
-                    cmd = next(prog)
-                    alive += 1
+                    state, duration = next(prog)
                 except StopIteration:
-                    cmd = default
+                    done[i] = True
+                    state, duration = OFF, 0
+                if not isinstance(state, int) or not 0 <= state <= 3:
+                    raise ValueError("channel state must be an integer from 0 to 3")
+                duration = _duration(duration)
                 val &= ~((1 << i) + (1 << (N + i)))
-                val |= (cmd[0] % 2) << i
-                val |= (cmd[0] // 2) << (N + i)
-                times[i] = cmd[1]
-        min_time = min(times)
-        if not alive:
-            break
+                val |= (state & 1) << i
+                val |= (state >> 1) << (N + i)
+                times[i] = duration
+        active_times = [times[i] for i in range(N) if not done[i]]
+        if not active_times:
+            return
+        min_time = min(active_times)
         yield val, min_time
         for i in range(N):
-            times[i] -= min_time
+            if not done[i]:
+                times[i] -= min_time
 
 
 class CtrlAer:
     def __init__(self, sm_number, base_pin, n_pins, freq=FREQ):
+        if Pin is None:
+            raise RuntimeError("CtrlAer execution requires MicroPython on an RP2040/RP2350")
+        if not isinstance(n_pins, int) or not 1 <= n_pins <= 16:
+            raise ValueError("n_pins must be between 1 and 16")
+        if not isinstance(sm_number, int) or not 0 <= sm_number < len(pios) * 4:
+            raise ValueError("invalid state machine number for this board")
+        if not isinstance(base_pin, int) or not 0 <= base_pin <= 30 - n_pins:
+            raise ValueError("output pins must fit within GPIO 0 to 29")
         self.n_pins = n_pins
         self._freq = freq
+        self.pio_index = sm_number // 4
         self.pio = pios[sm_number // 4]
         self.sm_number = sm_number % 4
         self.bit_mask = 1 << self.sm_number
@@ -94,16 +135,17 @@ class CtrlAer:
         self.sm = StateMachine(
             sm_number, oscillator, freq=self._freq * 2 * 7, out_base=Pin(base_pin)
         )
+        self._start_pc = mem32[0x502000d4 + (sm_number // 4) * 0x100000 + self.sm_number * 24]
         self.sm.active(1)
 
     def set_freq(self, freq):
+        i, f = clkdiv(freq * 2 * 7, globals()["freq"]())
+        address = 0x502000c8 + (self.pio_index * 0x100000) + self.sm_number * 24
+        mem32[address] = (i << 16) | (f << 8)
         self._freq = freq
-        i, f = clkdiv(freq * 2 * 7, RP_CLK)
-        self.sm_reg.CLKDIV.INT = i
-        self.sm_reg.CLKDIV.FRAC = f
         
     def ticks(self, time):
-        return int(time * self._freq) // 1000
+        return int(_duration(time) * self._freq / 1000)
     
     def is_full(self):
         return (self.pio.FSTAT.TXFULL & self.bit_mask) >> self.sm_number
@@ -112,9 +154,13 @@ class CtrlAer:
         return (self.pio.FSTAT.TXEMPTY & self.bit_mask) >> self.sm_number
     
     def block(self):
-        while True:
-            if self.is_empty():
-                break
+        # TXEMPTY becomes true as soon as the duration is loaded. Completion is
+        # the next blocked state-word PULL, after the final duration has elapsed.
+        debug = 0x50200008 + self.pio_index * 0x100000
+        address = 0x502000d4 + self.pio_index * 0x100000 + self.sm_number * 24
+        mem32[debug] = self.bit_mask << 24
+        while not (self.is_empty() and mem32[debug] & (self.bit_mask << 24)
+                   and mem32[address] == self._start_pc):
             sleep(0.001)
 
     def run(self, prog, block=True, use_ms=True):
@@ -127,21 +173,39 @@ class CtrlAer:
         """
         put = self.sm.put
         unit = self.ticks if use_ms else lambda x: x
-        for state, length in prog:
-            if not block and self.is_full():
-                return
+        prog = iter(prog)
+        while True:
+            # Check room for a whole pair before advancing a generator. Returning
+            # the same iterator lets the caller resume without losing a command.
+            if not block and self.sm.tx_fifo() > 6:
+                return prog
+            try:
+                state, length = next(prog)
+            except StopIteration:
+                return None
+            if not isinstance(state, int) or not 0 <= state < (1 << (2 * self.n_pins)):
+                raise ValueError("state does not fit the configured channels")
+            length = _duration(length)
+            if length == 0:
+                continue
+            ticks = unit(length)
+            if not isinstance(ticks, int) or not 1 <= ticks <= 0x100000000:
+                raise ValueError("duration must encode between 1 and 2**32 ticks")
             put(state)
-            put(unit(length) - 1)
+            put(ticks - 1)
     
     def listen(self, io):
         def fn():
             while True:
-                line = io.readline().strip()
-                if line == b'END':
+                line = io.readline()
+                if line in (b'', ''):
+                    return
+                line = line.strip()
+                if line in (b'END', 'END'):
                     break
                 if not line:
                     continue
-                cmd, duration = line.split(',')
+                cmd, duration = line.split(b',' if isinstance(line, bytes) else ',')
                 cmd = int(cmd)
                 duration = int(duration)
                 yield cmd, duration
