@@ -58,4 +58,55 @@ DMA request constants. See that repository's `tests/HARDWARE.md`.
 
 The probe shares the output oscillator. These tests establish relative digital
 timing, not independent absolute calibration, analogue drive quality or atomiser
-resonance/actuation. No external oscilloscope or inter-board wiring was used.
+resonance/actuation. The checks above used no external oscilloscope or inter-board
+wiring.
+
+## Independent inter-board capture
+
+Connect the same GPIO on the Tiny 2040 and Pico Plus 2, and connect their grounds.
+With the current modules installed on both otherwise idle boards, run:
+
+```sh
+python3 tools/cross_board.py --tiny-port /dev/cu.usbmodem3101 \
+    --pico-port /dev/cu.usbmodem101 --gpio 6 --out-dir /tmp/ctrlaer-link
+```
+
+The host arms the receiver before starting the sender, then exchanges their roles.
+`--gpio` selects a shared header GPIO from 0 through 7 (default: 7).
+Only one end drives the link at a time; both ends are returned to inputs afterward.
+The Tiny RGB LED is blue for sending and green for receiving. The Pico Plus 2 has
+a single-colour LED: steady for sending and blinking for receiving. An unexpected
+test-tool exception sets error indicators. The last roles remain visible after a
+completed test, even when a signal comparison fails.
+
+The 25.1 ms pattern includes a 100 us start marker, 10 kHz/25% and
+108.05 kHz/40% bursts, and the full 20 ms triangular chirp. The receiver captures
+26 ms at 10 MS/s using its own oscillator. Both exact prepared and captured buffers
+are downloaded in small chunks, hash-checked and stored in experiment records;
+VCD files and a combined `results.json` accompany them. A failed waveform match
+is retained and the other direction is still tested. Exit status is nonzero if
+either direction fails. `--direction` selects a single direction when diagnosing
+wiring.
+
+Acceptance requires matching edge counts/levels, a complete ordinary comparison
+within 2 us, relative clock difference within 100 ppm, and at most 200 ns residual
+after fitting that clock difference. The fit is reported separately from the
+ordinary comparison and does not turn missing or extra pulses into a pass.
+Independent oscillators permit a relative frequency check; neither is a calibrated
+absolute reference.
+
+Observed on the original GPIO7/GND setup on 2026-11-09: Pico-to-Tiny passed with
+2,337 rising edges, zero mismatches,
+about 9 ppm relative clock difference and a maximum fitted residual of 53 ns.
+Tiny-to-Pico instead produced a constant-HIGH capture with no RX overrun. Slow
+GPIO tests reproduced the stuck-HIGH behaviour; briefly disabling the Pico input
+buffer cleared it. This characterises that original link/input-stage setup;
+the failed capture is retained as diagnostic evidence.
+
+The follow-up on GPIO6 with a different Pico ground connection passed in both
+directions, using unchanged waveform/runtime modules. Slow HIGH/LOW checks also
+passed (100 receiver samples per direction). Each full capture contains 2,337
+rising edges and zero mismatches; fitted clock differences are about -9/+9 ppm
+and maximum residuals are 51/53 ns at 100 ns sample resolution. Both GPIO and
+ground connection changed, so this does not isolate the cause of the earlier
+GPIO7 failure.
