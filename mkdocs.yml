@@ -41,6 +41,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Install and upgrade: installation.md
   - Getting started: getting-started.md
   - API reference: api-reference.md
   - Examples: examples.md
@@ -49,3 +50,4 @@ nav:
   - Digital capture: digital-capture.md
   - Analysis, scans and records: analysis-and-records.md
   - Implementation and validation: capabilities-plan.md
+  - Performance: performance.md
