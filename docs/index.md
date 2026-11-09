@@ -14,7 +14,7 @@ CtrlAer provides a high-level interface for controlling multiple output pins wit
 ## Key features
 
 - **Precise timing control**: Generate signals with exact timing at any integer division of the microcontroller's base frequency
-    - Maximum frequency for square pulse generation is processor clock frequency / 10, since 10 PIO instructions are used to generate a square wave.
+    - Maximum frequency for square pulse generation is processor clock frequency / 14, since 14 PIO instructions are used to generate a square wave.
 - **Multiple outputs**: Control multiple pins simultaneously with perfect synchronization
 - **Flexible programming**: Create complex signal patterns using Python generators and a handful of CtrlAer primitives
 - **High performance**: Utilizes RP2040/2350's PIO for reliable timing

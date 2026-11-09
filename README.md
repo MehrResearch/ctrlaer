@@ -30,7 +30,7 @@ CtrlAer is designed to lower the barrier to entry for scientists and engineers l
 ## Quick Start
 
 1. Install MicroPython on your Raspberry Pi Pico
-2. Copy `ctrlaer.py` to your Pico
+2. Copy all `ctrlaer*.py` modules to your Pico's `lib` folder
 3. Create your control program:
 
 ```python
@@ -56,6 +56,29 @@ controller.run(prog)
 ```
 
 ## Documentation
+
+The generator DSL also supports prepared DMA playback, hardware gates, coordinated
+carriers, duty/phase/dead-time control, digital capture, desktop preview and scans:
+
+```python
+from ctrlaer import CtrlAer, chirp, OFF
+
+def experiment(pulse_ms=20, sweep_ms=2):
+    yield chirp(90000, 120000, sweep_ms=sweep_ms), pulse_ms
+    yield OFF, 100
+
+# Sweep 2 ms up and 2 ms down, repeating independently of the ON duration.
+controller = CtrlAer(0, 0, 1)
+try:
+    controller.prepare(experiment()).start().wait(timeout_ms=1000)
+finally:
+    controller.close()
+```
+
+Existing `(command, duration)` generators, `mux()` and streaming `run()` remain
+supported. CtrlAer-owned sleep/print/wait effects are interpreted during analysis;
+other Python side effects execute normally. See the prepared execution and analysis
+guides for timing, memory bounds and firmware requirements.
 
 Full documentation is available at [https://mehrresearch.github.io/ctrlaer](https://mehrresearch.github.io/ctrlaer), including:
 

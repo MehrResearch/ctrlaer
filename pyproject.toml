@@ -1,12 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "ctrlaer"
-version = "0.1.0"
+version = "0.2.0"
 description = "A MicroPython library for precise binary signal generation on Raspberry Pi Pico using PIO"
 readme = "README.md"
 authors = [
     { name = "Hessam Mehr", email = "Hessam.Mehr@glasgow.ac.uk" }
 ]
-license = "Apache-2.0"
+license = { text = "MIT" }
 classifiers = [
     "Development Status :: 4 - Beta",
     "Programming Language :: Python :: Implementation :: MicroPython",
@@ -16,6 +20,12 @@ classifiers = [
 ]
 keywords = ["raspberry-pi", "pico", "micropython", "pio", "binary-signal-generation"]
 requires-python = ">=3.7"
+
+[project.scripts]
+ctrlaer = "ctrlaer_tools:main"
+
+[tool.setuptools]
+py-modules = ["ctrlaer", "ctrlaer_commands", "ctrlaer_program", "ctrlaer_runtime", "ctrlaer_capture", "ctrlaer_tools", "ctrlaer_records"]
 
 [project.urls]
 Homepage = "https://github.com/MehrResearch/ctrlaer"

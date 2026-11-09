@@ -273,8 +273,8 @@ ser.close()
 - Commands are sent as text in the format: `<state>,<duration>`
 - `state`: Integer value corresponding to CtrlAer constants:
   - `0`: LOW/OFF (constant low)
-  - `1`: PULSE01 (square wave starting low)
-  - `2`: PULSE10/ON (square wave starting high)
+  - `1`: PULSE01 (square wave starting HIGH)
+  - `2`: PULSE10/ON (square wave starting LOW)
   - `3`: HIGH (constant high)
 - `duration`: Time in milliseconds
 - Special command `END` terminates the listening session
@@ -300,7 +300,7 @@ ser.close()
 
 ## Timing Control Options
 
-This example demonstrates how to control timing using either milliseconds (default) or raw PIO clock ticks for precise control over period count.
+This example demonstrates how to control timing using either milliseconds (default) or carrier period counts.
 
 ### Code
 
@@ -337,7 +337,7 @@ ctrlaer.run(step_ticks(), use_ms=False)  # Explicitly specify raw ticks
   - CtrlAer automatically converts to appropriate number of ticks
   
 - `use_ms=False`: Timing specified in raw PIO clock ticks
-  - Precise control over exact number of PIO cycles
+  - Precise control over the number of carrier periods
   - Allows defining signals in terms of period count rather than duration
 
 #### Use cases

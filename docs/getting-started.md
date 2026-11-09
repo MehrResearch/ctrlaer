@@ -76,8 +76,8 @@ prog = mux(progs)
 - RP2040 has 8 state machines (0-7)
 - RP2350 has 12 state machines (0-11)
 - State machines are grouped in blocks of 4
-- All state machines in a block share the same frequency
-- Use different blocks for different frequencies
+- Each state machine has its own frequency divider
+- Use different state machines for independently controlled frequencies
 
 ## Common Patterns
 
@@ -99,7 +99,7 @@ controller.block()  # Wait for completion
 # Create controller at initial frequency
 controller = CtrlAer(sm_number=0, base_pin=0, n_pins=2, freq=10000)
 
-# Change frequency later (affects all pins in same PIO block)
+# Change frequency later (affects the pins driven by this state machine)
 controller.set_freq(20000)
 ```
 

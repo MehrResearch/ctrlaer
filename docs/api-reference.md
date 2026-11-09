@@ -5,8 +5,8 @@
 ### Pin states
 - `HIGH` (0b11): Constant high output
 - `LOW` (0b00): Constant low output (alias: `OFF`)
-- `PULSE10` (0b10): Square wave at frequency `freq`, starting high (alias: `ON`)
-- `PULSE01` (0b01): Square wave at frequency `freq`, starting low (180° phase shift)
+- `PULSE10` (0b10): Square wave at frequency `freq`, starting LOW (alias: `ON`)
+- `PULSE01` (0b01): Square wave at frequency `freq`, starting HIGH (180° phase shift)
 
 ### Default values
 - `FREQ` (108,050): Default frequency in Hz for square wave generation. This value is used if no `freq` is specified in the CtrlAer constructor.
@@ -49,8 +49,8 @@ CtrlAer(sm_number=0, base_pin=0, n_pins=1, freq=FREQ)
 
 **Notes:**
 - State machines are grouped into PIO blocks (0-3, 4-7, 8-11)
-- All state machines in the same PIO block share the same frequency
-- Each PIO block can have its own frequency
+- Each state machine has its own frequency divider
+- State machines in the same PIO block may use different frequencies
 
 **Example:**
 ```python
@@ -66,7 +66,7 @@ Runs a program on the PIO state machine.
 
 **Parameters:**
 - `prog`: Generator program yielding `(state, duration)` tuples
-- `block` (bool, optional): Whether to block until program completion. Defaults to True.
+- `block` (bool, optional): Whether to keep feeding until all commands are queued. Call block() for execution completion. Defaults to True.
 - `use_ms` (bool, optional): If `True`, interpret durations as milliseconds; if `False`, interpret as raw PIO ticks. Defaults to True.
 
 **Notes about timing:**
@@ -74,7 +74,7 @@ Runs a program on the PIO state machine.
 - When `use_ms=False`, durations are interpreted as raw PIO ticks
 - Example: At 100 kHz square wave frequency, 10000 ticks = 100 ms
 - 1 tick = one square wave pulse period
-- The current implementation of CtrlAer's PIO assembly takes 10 PIO clock cycles to execute, though this is an implementation detail that users shouldn't have to worry about.
+- The current implementation of CtrlAer's PIO assembly takes 14 PIO clock cycles to execute, though this is an implementation detail that users shouldn't have to worry about.
 
 **Example with millisecond timing (default):**
 ```python
@@ -99,7 +99,7 @@ ctrlaer.run([
 
 ##### `block()`
 
-Blocks until the current program completes (FIFO empty).
+Blocks until the state machine reaches its next blocked state-word PULL after completing the queued commands.
 
 **Example:**
 ```python
@@ -110,7 +110,7 @@ ctrlaer.block()  # Wait for completion
 
 ##### `set_freq(freq)`
 
-Changes the square wave frequency for the PIO block containing this state machine.
+Changes the streaming square wave frequency of this state machine.
 
 **Parameters:**
 - `freq` (int): New frequency in Hz
@@ -131,7 +131,8 @@ Reads commands from an input stream and executes them in real-time.
 - Each line should be in the format `<state>,<duration>` where:
   - `state`: Integer corresponding to pin state constants
     - For single pin: 0=OFF/LOW (0b00), 1=PULSE01 (0b01), 2=ON/PULSE10 (0b10), 3=HIGH (0b11)
-    - For multiple pins: binary pattern where each 2 bits represent a pin state
+    - For multiple pins: two bit planes, one bit per pin in each plane. Use `mux()`
+      to construct these values from single-pin commands.
   - `duration`: Time in milliseconds
 - Special command `END` terminates the listening session
 
@@ -158,14 +159,12 @@ from io import BytesIO
 # Create controller for 3 pins (GP0, GP1, GP2)
 ctrlaer = CtrlAer(sm_number=0, base_pin=0, n_pins=3)
 
-# Command for 3 pins: binary pattern 0b011100 (decimal 28)
-# Pin 0 (rightmost 2 bits): 00 = OFF
-# Pin 1 (middle 2 bits): 11 = HIGH
-# Pin 2 (leftmost 2 bits): 01 = PULSE01
-commands = BytesIO(b"28,250\n63,100\n57,100\nEND\n")
-# 28,250 (0b011100): PULSE01-HIGH-OFF for 250 ms
-# 63,100 (0b111111): HIGH-HIGH-HIGH for 100 ms
-# 57,80 (0b110101): HIGH-PULSE10-PULSE01 for 80 ms
+# For n_pins=3, bits 0..2 are the first half-cycle levels and bits 3..5
+# are the second half-cycle levels. Within each plane GP0 is the lowest bit.
+commands = BytesIO(b"22,250\n63,100\n53,80\nEND\n")
+# 22 = 0b010_110: GP0 OFF, GP1 HIGH, GP2 PULSE01 for 250 ms
+# 63 = 0b111_111: all HIGH for 100 ms
+# 53 = 0b110_101: GP0 PULSE01, GP1 PULSE10, GP2 HIGH for 80 ms
 ctrlaer.listen(commands)
 ```
 
@@ -177,7 +176,7 @@ Converts milliseconds to timer ticks.
 - `time` (int): Time in milliseconds
 
 **Returns:**
-- Number of timer ticks (where 1 tick = one square wave pulse period = 10 PIO clock cycles)
+- Number of timer ticks (where 1 tick = one square wave pulse period = 14 PIO clock cycles)
 
 **Notes:**
 - The conversion formula is `ticks = time * freq / 1000`
@@ -218,7 +217,7 @@ The library uses a PIO program that:
 For square wave states (PULSE10/PULSE01), the output toggles at the frequency specified in the CtrlAer constructor.
 
 **Implementation details:**
-- The PIO state machine runs at 10 times the square wave frequency (`freq * 2 * 5`)
-- Each square wave pulse period equals 10 PIO clock cycles (1 tick)
+- The PIO state machine runs at 14 times the square wave frequency (`freq * 2 * 7`)
+- Each square wave pulse period equals 14 PIO clock cycles (1 tick)
 - Duration is measured in ticks (square wave pulse periods)
 - The `use_ms` parameter in `run()` determines whether durations are interpreted as milliseconds or raw ticks
