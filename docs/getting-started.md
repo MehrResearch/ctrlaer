@@ -1,122 +1,108 @@
-# Getting Started
+# Your first waveform
 
-## Basic Concepts
+CtrlAer programs are Python generators that yield `(command, duration)` pairs.
+Keep using loops, functions, variables and `mux()` to build experiments. The
+execution mode determines when Python runs and how much waveform data is
+prepared ahead of the hardware.
 
-CtrlAer is built around three main concepts:
+[Install CtrlAer](installation.md) on a board running MicroPython first. The code
+below runs **on the board**, for example from its REPL. Desktop Python can
+compile and preview programs, but cannot drive a board's PIO directly.
 
-1. **Signal Generators**: Python generators that yield timing patterns
-2. **Signal Multiplexing**: Combining multiple generators to control multiple pins
-3. **PIO Execution**: Running the program on RP2040/RP2350 hardware
+## Three short bursts
 
-## Creating Signal Patterns
-
-### Simple Patterns
-
-The simplest way to create a signal pattern is to yield pairs of (state, duration):
-
-```python
-def blink_led():
-    while True:
-        yield HIGH, 1000  # Constant HIGH for 1 second
-        yield LOW, 1000   # Constant LOW for 1 second
-```
-
-### Square Waves
-
-For high-frequency applications, use `PULSE10` or `PULSE01`:
+This program produces three 2 ms bursts at 40 kHz. Each contains 80 carrier
+periods, followed by 8 ms LOW. The sequence lasts 30 ms, plus the 12 system-clock
+ticks used to apply the final mask and signal completion.
 
 ```python
-def ultrasonic_burst():
-    # Generate 40kHz square wave for 100ms, then off for 900ms
-    while True:
-        yield PULSE10, 100   # Square wave at freq Hz
-        yield OFF, 900       # Off for 900ms
+from ctrlaer import CtrlAer, ON, OFF
+
+def bursts():
+    for _ in range(3):
+        yield ON, 2
+        yield OFF, 8
+
+controller = CtrlAer(0, base_pin=6, n_pins=1, freq=40000)
+try:
+    run = controller.prepare(bursts())
+    run.start().wait(timeout_ms=1000)
+finally:
+    controller.close()
 ```
 
-The square wave frequency is set when creating the controller:
-```python
-controller = CtrlAer(sm_number=0, base_pin=0, n_pins=1, freq=40000)  # 40kHz
-```
+`prepare()` consumes this finite generator, compiles its waveform and preloads
+DMA while playback is disabled. `start()` enables output; `wait()` waits for
+hardware completion and reports errors. `close()` releases the state machine
+and DMA channels. The default final mask is LOW.
 
-### Multiple Pins
+![Three bursts over the complete 30 ms program](assets/first-bursts.svg)
 
-Each generator in a multiplexed program controls one pin:
+At this scale the carrier edges form solid bands. The first 100 µs reveals four
+periods. `ON` is the original `PULSE10` command: LOW in the first half of each
+period, HIGH in the second half.
 
-```python
-def motor_phase1():
-    while True:
-        yield PULSE10, 50
-        yield OFF, 50
+![The first four periods, starting LOW](assets/first-bursts-zoom.svg)
 
-def motor_phase2():
-    while True:
-        yield PULSE01, 50  # 180° out of phase
-        yield OFF, 50
+The output is the pin labelled **GP6**, rather than physical pin number 6; see
+the [physical-position table](wiring.md). No
+external wiring is required to run this example. To observe the signal, connect
+a digital input or instrument to GP6 and connect its ground to the board's GND.
+GPIO is a 3.3 V logic signal; connect a load through a suitable driver rather
+than connecting a motor, valve or atomiser directly to the GPIO.
 
-# First pin controlled by phase1, second pin by phase2
-progs = [motor_phase1(), motor_phase2()]
-prog = mux(progs)
-```
+## Commands and durations
 
-## Hardware Setup
+For one channel the original constants have these meanings:
 
-### Pin Assignment
+| Command | Value | Output during one carrier period |
+|---|---:|---|
+| `LOW`, `OFF` | 0 | LOW throughout |
+| `PULSE01` | 1 | HIGH, then LOW |
+| `ON`, `PULSE10` | 2 | LOW, then HIGH |
+| `HIGH` | 3 | HIGH throughout |
 
-- Pins are assigned sequentially starting from `base_pin`
-- Each generator in a multiplexed program controls one pin
-- Example with `base_pin=2` and three generators:
-  ```
-  GP2 → First generator
-  GP3 → Second generator
-  GP4 → Third generator
-  ```
+Durations normally use milliseconds. Original integer commands use whole
+carrier periods: a non-integer number of periods is truncated. At 40 kHz one
+period is 25 µs. With `use_ms=False`, a duration is a **number of carrier
+periods at the controller's `freq`**, not a number of system-clock ticks.
 
-### State Machine Selection
+`pulse(freq, duty=..., phase=...)` and `chirp(...)` supply a command's own
+frequency trajectory. Their millisecond durations are compiled to the nearest
+system-clock tick. Rich `pulse()` starts with its ideal rising edge at phase
+zero; this differs from the LOW-first `ON` constant. See the
+[command reference](api-reference.md) and [worked examples](examples.md).
 
-- RP2040 has 8 state machines (0-7)
-- RP2350 has 12 state machines (0-11)
-- State machines are grouped in blocks of 4
-- Each state machine has its own frequency divider
-- Use different state machines for independently controlled frequencies
+## Running indefinitely
 
-## Common Patterns
+Finite preparation must reach the end of its generator. To use an unbounded
+generator, select buffered execution. For the same burst pattern, replace the
+`for` loop above with `while True`, prepare with `mode="buffered"`, then call
+`run.start()`. Output continues while the producer supplies buffers. Call
+`run.abort()` to stop it, and `controller.close()` when finished.
 
-### Blocking vs Non-blocking
+Buffered execution supports hardware triggers and `wait_for()` inside the
+generator. It consumes bounded lookahead, so ordinary Python side effects may
+occur before their associated output. Use eager execution when Python must
+observe each completed command before deciding the next one. See
+[execution modes](execution-modes.md) for runnable examples, memory budgets and
+timing guarantees.
 
-```python
-# Blocking (wait for completion)
-controller.run(prog)
+## Multiple outputs and state machines
 
-# Non-blocking with later synchronization
-controller.run(prog, block=False)
-# Do other things
-controller.block()  # Wait for completion
-```
+`mux([a(), b()])` assigns its generators to consecutive GPIOs starting at
+`base_pin`: for example GP6 and GP7 with `base_pin=6, n_pins=2`. Original integer
+commands share the controller's carrier. Rich commands can describe independent
+carriers, subject to the minimum spacing between merged edges. A `Group` can
+start separate prepared state machines together; see
+[triggers and groups](triggers-and-groups.md).
 
-### Frequency Control
+RP2040 has eight state machines, numbered 0–7, and RP2350 has twelve, numbered
+0–11. Blocks contain four state machines each. Controllers must use different
+state machines and non-overlapping output GPIOs. Capture also consumes a state
+machine and DMA resources.
 
-```python
-# Create controller at initial frequency
-controller = CtrlAer(sm_number=0, base_pin=0, n_pins=2, freq=10000)
-
-# Change frequency later (affects the pins driven by this state machine)
-controller.set_freq(20000)
-```
-
-### Finite vs Infinite Programs
-
-```python
-# Finite program (runs 10 times then stops)
-def finite_pattern():
-    for _ in range(10):
-        yield ON, 100
-        yield OFF, 100
-
-# Infinite program (runs until stopped)
-def infinite_pattern():
-    while True:
-        yield ON, 100
-        yield OFF, 100
-```
-
-See the [API Reference](api-reference.md) for detailed documentation of all features.
+The original `controller.run(program)` API remains available. Its `block`
+argument controls waiting for FIFO space; it does **not** establish that the
+last queued edge has played. Use `controller.block()` for completion with that
+API, or choose one of the explicit execution modes above.

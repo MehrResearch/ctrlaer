@@ -14,3 +14,6 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m unittest discover -s tests -v
+      - name: Check API reference against source
+        if: matrix.python == '3.12'
+        run: python tools/build_api.py --check

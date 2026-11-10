@@ -2,100 +2,93 @@
 
 [![DOI](https://zenodo.org/badge/690546753.svg)](https://doi.org/10.5281/zenodo.14763862)
 
-A MicroPython library for programmable real-time execution of scientific experiments on Raspberry Pi Pico. CtrlAer enables synchronized operation of multiple hardware devices through a simple, yet powerful Python-based DSL.
+CtrlAer turns Python generators into precisely timed digital waveforms on
+RP2040 and RP2350 boards. It is used for laboratory experiments involving
+coordinated drivers, atomisers, valves, illumination and other logic-controlled
+hardware.
 
-## Overview
+Programs yield `(command, duration)` pairs. The same vocabulary supports finite
+prepared playback, indefinite buffered operation with hardware triggers, eager
+execution with Python measurements between commands, and desktop analysis.
+`mux()` combines up to 16 consecutive output channels; `Group` coordinates
+independent state machines. Commands include fixed carriers, duty/phase control,
+complementary dead time and continuous-phase triangular frequency sweeps.
 
-CtrlAer is designed to lower the barrier to entry for scientists and engineers looking to undertake experiments involving synchronized activation of multiple devices. It can generate arbitrarily complex timing patterns and control hardware with microsecond precision using the RP2040/RP2350 programmable I/O subsystem.
+## Install or upgrade
 
-### Key Features
+With [uv](https://docs.astral.sh/uv/getting-started/installation/), from this checkout:
 
-- **High-Precision Timing**: Generate signals with microsecond precision
-- **Multiple Synchronized Outputs**: Control up to 16 parallel channels
-- **Flexible Programming**: Create complex signal patterns using Python generators
-- **Real-Time Performance**: Direct hardware execution via RP2040's PIO
-- **Wide Hardware Support**: Works with all RP2040/RP2350-based boards
-
-### Target Applications
-
-- Motor control (including stepper motors)
-- Solid state and mechanical relays
-- Solenoid valves
-- Light sources
-- High-frequency mechanical transducers
-- Ultrasonic emitters
-- Piezoelectric actuators
-- Vibrating mesh atomizers (VMAs)
-
-## Quick Start
-
-1. Install MicroPython on your Raspberry Pi Pico
-2. Copy all `ctrlaer*.py` modules to your Pico's `lib` folder
-3. Create your control program:
-
-```python
-from ctrlaer import mux, HIGH, LOW, CtrlAer
-
-def phase1(n_steps):
-    for i in range(n_steps):
-        yield HIGH, 50  # ON for 50ms
-        yield LOW, 50   # OFF for 50ms
-
-def phase2(n_steps):
-    for i in range(n_steps):
-        yield LOW, 50   # Start OFF
-        yield HIGH, 50  # ON for 50ms
-
-# Combine both phases
-progs = [phase1(10), phase2(10)]
-prog = mux(progs)
-
-# Create controller and run
-controller = CtrlAer(sm_number=0, base_pin=0, n_pins=2, freq=10000)
-controller.run(prog)
+```sh
+uv run tools/install.py
 ```
 
-## Documentation
+The script enumerates USB serial devices and asks you to select one. It compiles
+native `.mpy` modules for the selected chip, uploads and verifies them, and keeps
+the previous library for rollback. Use `--device PORT` or `--device USB_SERIAL`
+for explicit selection. Repeat after updating the checkout to upgrade. Requires
+board-specific MicroPython 1.29.0 or newer; user application files are retained.
+See the [installation guide](docs/installation.md) for firmware, standalone use
+and troubleshooting.
 
-The generator DSL also supports prepared DMA playback, hardware gates, coordinated
-carriers, duty/phase/dead-time control, digital capture, desktop preview and scans:
+## First waveform
+
+Run this on the board. GP6 produces three 2 ms bursts at 40 kHz, each followed by
+8 ms LOW. Each burst contains 80 carrier periods. GP6 is a GPIO label, not
+physical header position 6.
 
 ```python
-from ctrlaer import CtrlAer, chirp, OFF
+from ctrlaer import CtrlAer, ON, OFF
 
-def experiment(pulse_ms=20, sweep_ms=2):
-    yield chirp(90000, 120000, sweep_ms=sweep_ms), pulse_ms
-    yield OFF, 100
+def bursts():
+    for _ in range(3):
+        yield ON, 2
+        yield OFF, 8
 
-# Sweep 2 ms up and 2 ms down, repeating independently of the ON duration.
-controller = CtrlAer(0, 0, 1)
+controller = CtrlAer(0, base_pin=6, n_pins=1, freq=40000)
 try:
-    controller.prepare(experiment()).start().wait(timeout_ms=1000)
+    controller.prepare(bursts()).start().wait(timeout_ms=1000)
 finally:
     controller.close()
 ```
 
-Existing `(command, duration)` generators, `mux()` and streaming `run()` remain
-supported. CtrlAer-owned sleep/print/wait effects are interpreted during analysis;
-other Python side effects execute normally. See the prepared execution and analysis
-guides for timing, memory bounds and firmware requirements.
+![Three 40 kHz bursts, with 8 ms LOW between them](docs/assets/first-bursts.svg)
 
-Full documentation is available at [https://mehrresearch.github.io/ctrlaer](https://mehrresearch.github.io/ctrlaer), including:
+Preparation consumes this finite generator before enabling output. The PIO/DMA
+engine then plays the waveform, signals completion, and finishes LOW. No jumper
+is needed to execute it. To observe it, connect a digital input to GP6 and common
+GND. See [physical pins and wiring](docs/wiring.md) before connecting a driver.
 
-- Getting Started Guide
-- API Reference
-- Example Applications
-- Hardware Setup Instructions
+## Choose execution timing
 
-## Hardware Compatibility
+| Need | Entry point |
+|---|---|
+| Validate, preview and replay a complete finite schedule | `controller.prepare(program)` |
+| Run indefinitely with hardware gates and bounded waveform storage | `controller.prepare(factory, mode="buffered")` |
+| Complete each command before resuming ordinary Python | `controller.run(program, mode="eager")` |
+| Keep the original integer-command FIFO API | `controller.run(program)` |
 
-CtrlAer works with any RP2040/RP2350-based development board, including:
-- Raspberry Pi Pico / Pico W
-- Raspberry Pi Pico 2
-- AdaFruit RP2040-based boards
-- SparkFun RP2040-based boards
-- Seeed Studio RP2040-based boards
-- Pimoroni RP2040-based boards
+Buffered operation keeps producing while PIO plays earlier chunks; production
+must meet its deadlines. Eager operation deliberately permits Python gaps
+between commands. Ordinary Python side effects happen whenever the generator
+advances; use CtrlAer's `sleep`, `print` and `wait_for` for managed playback
+operations. The original FIFO `block` argument waits for queue space; call
+`controller.block()` for actual completion.
+
+## Documentation and validation
+
+The [full documentation](https://mehrresearch.github.io/ctrlaer/) and this
+checkout's guides cover:
+
+- [Getting started](docs/getting-started.md) and [worked examples](docs/examples.md), with waveform plots.
+- [Execution modes](docs/execution-modes.md), [hardware triggers and groups](docs/triggers-and-groups.md).
+- [Digital capture](docs/digital-capture.md), [previews, parameter scans and records](docs/analysis-and-records.md).
+- [API reference](docs/api-reference.md), generated from actual signatures and docstrings.
+- [Performance measurements](docs/performance.md) and [reproducible hardware checks](tests/hardware/README.md).
+
+Cold first-output latency and sustained production have been measured on a Tiny
+2040 and Pico Plus 2, including independent bidirectional capture over GPIO6/GND.
+Performance depends on the waveform, chip, available memory and Python work;
+see the measured envelope in the performance guide.
 
 ## Academic Citation
 

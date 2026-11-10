@@ -5,27 +5,30 @@ experiment language or builder is needed.
 
 ## Hardware inputs
 
+Connect a 3.3 V trigger source to GP6 and common GND; GP0 is the drive
+output. See the [physical wiring guide](wiring.md#trigger-an-experiment).
+
 ```python
 from ctrlaer import CtrlAer, ON, OFF, Trigger, wait_for
 from machine import Pin
 
-Pin(9, Pin.IN, Pin.PULL_DOWN)
+Pin(6, Pin.IN, Pin.PULL_DOWN)
 
 def experiment():
     yield ON, 20
     yield OFF, 1
-    wait_for(9, level=1, timeout_ms=1000)
+    wait_for(6, level=1, timeout_ms=1000)
     yield ON, 20
 
 controller = CtrlAer(0, 0, 1)
 try:
-    run = controller.prepare(experiment(), trigger=Trigger(9, timeout_ms=5000))
+    run = controller.prepare(experiment(), trigger=Trigger(6, timeout_ms=5000))
     run.start().wait(timeout_ms=10000)
 finally:
     controller.close()
 ```
 
-An initial `Trigger` waits before the generator's first command. `wait_for` adds
+An initial `Trigger` waits before the generator's first output command. `wait_for` adds
 a gate at a generator boundary. Rising-edge waits require LOW followed by HIGH;
 an already HIGH input is not a new rising edge. Falling waits do the reverse.
 Level waits release immediately if the requested level is already present.
@@ -46,19 +49,35 @@ use digital capture for hardware-sampled transition timestamps.
 ## Retriggering
 
 ```python
+from ctrlaer import CtrlAer, pulse, OFF, wait_for
+from machine import Pin
+
+Pin(6, Pin.IN, Pin.PULL_DOWN)
+
 def shots(n_shots=10):
     for _ in range(n_shots):
-        wait_for(9, timeout_ms=5000)
-        yield ON, 20
-        yield OFF, 1
+        wait_for(6, timeout_ms=5000)
+        yield pulse(108050), 20
+        yield OFF, 100
 
-run = controller.prepare(shots())
-run.start().wait(timeout_ms=60000)
+controller = CtrlAer(0, 0, 1)
+try:
+    run = controller.prepare(shots, mode="buffered")
+    run.start().wait(timeout_ms=60000)
+finally:
+    controller.close()
 ```
+
+Ten shots can exceed a Tiny's finite waveform budget. Buffered mode retains
+bounded lookahead while preserving the hardware gate before every burst.
+
+![Two nominal iterations of this shot pattern](assets/triggered.svg)
 
 The next input edge must arrive after the next gate is ready to observe LOW/HIGH;
 edges during an active pulse are not queued. Completed or aborted open runs can
 also be explicitly `rearm()`ed.
+See the [triggered-shot gallery](examples.md#wait-for-another-trigger-on-every-shot)
+for a complete indefinite example and its nominal waveform plot.
 
 ## Independent waveform groups
 
@@ -78,6 +97,17 @@ try:
 finally:
     group.close()
 ```
+
+The first 50 µs of each independently compiled member use the same time axis:
+
+![Group member A: 108.05 kHz, 50% duty on GP0](assets/group-a.svg)
+
+![Group member B: 111.5 kHz, 40% duty, quarter-cycle phase on GP1](assets/group-b.svg)
+
+Connect GP0 and GP1 to separate driver logic inputs and common GND. They are
+physical positions 16/15 on the Tiny and 1/2 on the Pico Plus 2; see
+[wiring](wiring.md). Group timing permits edge crossings that a single merged
+engine could not represent.
 
 One atomic enable/divider-reset write starts all group members in one PIO block.
 Each has an independent schedule/frequency and its own final mask. A member error
@@ -125,6 +155,8 @@ return traversal follows, producing a triangle in frequency. The default is a
 20 ms one-way traversal. Sweep rate is independent of pulse duration: the example
 spends 2 ms going up, 2 ms going down, and repeats for the whole 20 ms ON section.
 A shorter pulse clips that same frequency trajectory; it does not rescale it.
+
+![Five frequency triangles during a 20 ms ON section](assets/chirp-frequency.svg)
 
 Edges come from the integral of the piecewise-linear frequency, preserving phase
 through reversals and `mux` boundaries. Playback uses DMA rather than CPU-timed

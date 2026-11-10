@@ -1,75 +1,76 @@
-# Experiment capabilities implementation
+# Design and validation
 
-This work preserves the existing generator DSL and adds an inspectable prepared
-program path. Generators are the sole public authoring interface; no declarative
-builder is retained. CtrlAer-owned sleep/print/wait calls use scoped interpreters;
-arbitrary Python side effects remain the user's responsibility. No changes are
-made to the untracked `examples/testing/` directory.
+CtrlAer uses generators as its experiment-authoring interface. Analysis and
+playback interpret the same commands. Ordinary Python remains ordinary Python:
+global mutations, random state, file I/O and third-party calls run when a
+factory or generator advances. CtrlAer does not attempt to undo those effects.
 
-## Commit sequence and acceptance evidence
+## Execution layers
 
-1. Correct finite multiplexing, zero durations, nonblocking submission and actual
-   streaming completion. Verify host regressions and a long hardware command.
-2. Add a portable, clock-based timeline compiler and a DMA runtime with explicit
-   prepare/start/wait/abort, final outputs, bounded compilation and underrun
-   reporting. Verify timing, terminal completion, abort and fault handling on the
-   attached RP2040.
-3. Add hardware edge/level gates, start triggers, finite retriggering and timeout
-   supervision. Gate transitions execute in PIO; timeout supervision is explicitly
-   a Python/timer service with documented resolution. Verify edges and timeouts
-   using a second state machine as the signal source.
-4. Add coordinated waveform groups, duty cycle, phase and complementary dead time.
-   Verify simultaneous channels and independently inspect pulse periods and gaps.
-5. Add desktop timeline preview, validation, quantisation reports, named parameters
-   and deterministic scans. Use the same compiled edges as hardware execution.
-6. Add PIO/DMA capture, edge timestamps, intended/observed trace comparison and
-   experiment records. Verify known-good traces and deliberately wrong traces.
-7. Add continuous-phase triangular frequency chirps. The one-way sweep time is
-   independent of ON duration; longer pulses repeat up/down sweeps. Verify a
-   90–120 kHz sweep with 2 ms per leg throughout one 20 ms ON section, including
-   reversals, pulse count and phase continuity without CPU divider writes.
-
-## Design constraints
-
-- Core compilation and records import on CPython and MicroPython. Hardware imports
-  are confined to execution and capture. No simulation is presented as hardware
-  verification.
-- Preparation explicitly consumes supplied generators/factories and their ordinary
-  Python side effects. Infinite generators require a finite window or explicit bound;
-  overflowing limits fails rather than silently truncating the experiment.
-- The prepared backend consumes packed, constant-width PIO command/delay packets.
-  Its minimum edge interval and memory limit are validated before arming outputs.
-  A terminal PIO instruction acknowledges actual completion independently of DMA
-  completion or FIFO occupancy.
-- GPIO/state-machine ownership is checked. Groups in one PIO block start with one
-  register write. RP2350 neighbour controls extend this across PIO blocks; RP2040
-  groups spanning blocks require a common hardware trigger for aligned starts.
-- The current device shares its clock with the internal probe. Digital relative
-  timing can be verified; analogue quality and independent absolute calibration
-  remain outside this validation setup.
-
-## Completed scope and validation
-
-All six requested capabilities are implemented using generators. Validation on
-2026-11-09 includes 49 host tests, four upstream register-layout tests, a strict
-documentation build, wheel installation/CLI checks, and both attached boards:
-Tiny 2040 with MicroPython 1.29.0 and Pico Plus 2 with Pimoroni 1.29.0-2.
-
-| Capability | Implementation and acceptance evidence |
+| Layer | Responsibility |
 |---|---|
-| Buffered lifecycle | Finite/windowed generator compilation; prepare/start/wait/abort/rearm; final masks; injected underrun and timeout checks on both chips |
-| Hardware gates | PIO edge/level waits, trigger/retrigger, software timeout supervision; held-HIGH rejection and 30 repeated ready gates, including forced PSRAM buffers |
-| Coordinated waveforms | Atomic groups, independent frequencies, duty/phase and complementary dead time; RP2350 starts across PIO blocks verified by capture |
-| Analysis and scans | Same generator interpreter; SVG preview, validation/quantisation/pulse counts; ordinary keyword parameters and a validated nine-trial scan |
-| Capture and records | Finite PIO/DMA sampling, overrun detection, timestamps, coverage-aware comparison, CSV/VCD; hashed device records downloaded and revalidated on desktop |
-| Adiabatic sweeps | Independent one-way sweep time and ON duration; continuous triangular reversal; full 20 ms/2,100-cycle output captured on both chips with zero transition mismatches |
+| Generator vocabulary | Integer states, `pulse`, `chirp`, `mux`, managed sleep/print/wait |
+| Finite compiler | Complete clock-based schedule, validation, preview and exact replay artifacts |
+| Incremental compiler | Resumable commands, bounded chunks and event metadata |
+| PIO engine | Clock-timed output, holds, GPIO waits, completion and unpublished-successor guards |
+| DMA runtime | Queue prepared data; publish successors; supervise events, timeouts and errors |
+| Capture/analysis | Packed input samples, edge timestamps, coverage-aware comparison and records |
 
-The exact scripts and measured limits are recorded in `tests/hardware/README.md`.
-The upstream `rp2040hw` fix corrects native PIO register stride/scalars and RP2350
-DMA request selectors, verified against all 8/12 state machines. Other peripheral
-modules in that library have not been comprehensively ported to RP2350.
+Finite prepared output uses a complete validated buffer. Buffered output keeps
+four transmit DMA channels and a prepared spare ahead of the compiler. An
+allocation-free hard interrupt publishes a ready block; generator work remains
+in the soft service context. A missed successor leaves a blocking PIO guard
+intact, preventing stale data from being played. The software service then
+reports the underrun and applies the configured final mask.
 
-Prepared windows are finite buffers, without automatic streaming refill. Gates
-hold their last digital levels. Gate timeouts, print notifications and peer-fault
-cleanup have interpreter/service latency. Capture is relative to the chip's own
-clock. Analogue driver behaviour and atomiser response remain lab measurements.
+Eager execution uses that same engine for one yielded command at a time. Python
+runs after completion, with the last output level held during the next decision
+and preparation. Its inter-command gaps are deliberately outside real-time
+scheduling guarantees. See [execution modes](execution-modes.md).
+
+Native fixed-point kernels generate and pack carriers without per-edge Python
+allocation. A bounded chirp interval cache is used only when both frequency and
+integrated phase truly repeat. Local-coordinate rollover preserves indefinite
+phase progress. Non-repeating chirps use a bounded inverse-phase table with
+one-system-clock edge accuracy, while retaining fractional phase across sweeps.
+Waveform pools share alignment space with scratch storage to
+reduce pressure on the Tiny's non-moving heap.
+
+## Timing and resource invariants
+
+- GPIO/state-machine ownership is checked before arming. Controllers must use
+  non-overlapping output GPIOs and distinct state machines.
+- Output count and system clock must match the compiled schedule. A changed
+  system clock is an execution error; changing controller frequency cannot
+  retime an already compiled buffer.
+- Completion is acknowledged by PIO, independently of FIFO occupancy and DMA
+  completion. Gate timeouts and observation timestamps remain soft-service work.
+- Buffer, event and history storage are bounded for incremental playback.
+  Arbitrary user Python can still allocate or block without a bound.
+- Group starts are atomic within one PIO block. RP2350 neighbour controls extend
+  this across blocks; RP2040 cross-block groups require a common hardware trigger.
+- Capture records achieved sample rate and detects DMA stalls. A stalled or
+  incomplete trace cannot establish a successful whole-program comparison.
+
+## Evidence and reproduction
+
+The portable test suite checks the compiler against an independent analytic
+carrier model, chunk continuity, phase/sweep rollover, multiplexing, event order,
+records and installer activation/rollback. The API reference is generated from
+source signatures/docstrings and checked in CI. Documentation builds in strict
+mode; its waveform figures are regenerated from actual compiled programs.
+
+Hardware validation uses a Tiny 2040 with MicroPython 1.29.0 and a Pico Plus 2
+with Pimoroni 1.29.0-2. It includes lifecycle/fault tests, triggered indefinite
+operation, multi-channel production, eager cancellation, physical cold-start
+latency and bidirectional capture with independent oscillators. See
+[performance and limits](performance.md) and the repository's
+`tests/hardware/README.md` for commands and measured results.
+
+The earlier upstream `rp2040hw` changes correct PIO register strides/scalars and
+RP2350 DMA request selectors, checked across all 8/12 state machines. That does
+not establish a comprehensive RP2350 port of every peripheral in that library.
+
+A same-board probe shares the waveform clock. Two boards permit an independent
+relative clock check, but neither is an absolute calibrated reference. Analogue
+drive quality, mechanical response and atomisation remain laboratory measurements.

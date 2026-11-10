@@ -1,5 +1,6 @@
 site_name: CtrlAer documentation
-site_description: A MicroPython library for precise timing control on Raspberry Pi Pico
+site_url: https://mehrresearch.github.io/ctrlaer/
+site_description: Precisely timed generator programs on MicroPython RP2040 and RP2350 boards
 theme:
   name: material
   palette:
@@ -43,8 +44,11 @@ nav:
   - Home: index.md
   - Install and upgrade: installation.md
   - Getting started: getting-started.md
+  - Pins and wiring: wiring.md
+  - Execution modes: execution-modes.md
   - API reference: api-reference.md
   - Examples: examples.md
+  - Original FIFO recipes: original-recipes.md
   - Prepared execution: prepared-execution.md
   - Triggers and waveform groups: triggers-and-groups.md
   - Digital capture: digital-capture.md

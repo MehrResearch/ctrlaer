@@ -41,6 +41,5 @@ def aldehyde():
 
 prog = mux([amine(), aldehyde()])
             
-# GP14:  aldehyde
-# GP13:  amine
+# GP7: amine; GP8: aldehyde. GP16 controls the separate air driver.
 ctrlaer.run(prog)

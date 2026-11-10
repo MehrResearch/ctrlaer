@@ -1,6 +1,6 @@
 """
 Demonstrates the use of the use_ms parameter in CtrlAer.run()
-This example shows the difference between millisecond timing and raw clock tick timing.
+This example compares milliseconds with carrier-period counts at FREQ.
 """
 from ctrlaer import ON, OFF, CtrlAer
 from time import sleep

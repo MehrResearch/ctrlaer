@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="215" viewBox="0 0 1200 215">
+<rect width="100%" height="100%" fill="#101827"/>
+<g font-family="sans-serif" font-size="13" fill="#e6edf7">
+<text x="24" y="30" font-size="20">CtrlAer — compiled generator output</text>
+<text x="24" y="54">120.008 ms · 125000000 Hz clock · 33632 bytes · edge quantisation ≤ 8 ns</text>
+<text x="24" y="110">GP0</text>
+<text x="24" y="129" fill="#93a5bc">2100 pulses</text>
+<path d="M 150.000 130 H 233.558 V 102 H 290.189 V 130 H 346.819 V 102 H 403.286 V 130 H 459.835 V 102 H 516.221 V 130 H 572.606 V 102 H 628.910 V 130 H 685.214 V 102 H 741.437 V 130 H 797.659 V 102 H 853.718 V 130 H 909.859 V 102 H 965.837 V 130 H 1021.814 V 102 H 1077.710 V 130 H 1133.606 V 102 H 1170.000" fill="none" stroke="#64d8c5" stroke-width="1.5"/>
+<circle cx="150.000" cy="84" r="3" fill="#ffca70"><title>adiabatic shot 20 2</title></circle>
+<text x="150.000" y="198" text-anchor="middle">0 ms</text>
+<text x="354.000" y="198" text-anchor="middle">0.02 ms</text>
+<text x="558.000" y="198" text-anchor="middle">0.04 ms</text>
+<text x="762.000" y="198" text-anchor="middle">0.06 ms</text>
+<text x="966.000" y="198" text-anchor="middle">0.08 ms</text>
+<text x="1170.000" y="198" text-anchor="middle">0.1 ms</text>
+</g></svg>

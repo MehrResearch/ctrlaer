@@ -20,6 +20,11 @@ with open("preview.svg", "w") as stream:
     stream.write(render_svg(program))
 ```
 
+The [sweep example](examples.md#sweep-repeatedly-within-one-pulse) shows the same
+ON/rest waveform and its frequency trajectory. This analysis code runs on
+desktop Python with no physical connections. On a board, save large previews or
+records after playback stops; file I/O shares the interpreter with production.
+
 The summary includes channel names, pulse counts, nominal duration, requested
 duration, duration/edge quantisation, control overhead, effect annotations, gates
 and buffer size. An infinite generator needs `window_ms`; size/complexity guards
@@ -75,6 +80,11 @@ with SHA-256 checks; corrupt buffers and inconsistent executable metadata are
 rejected. Writing streams small chunks, then atomically renames the completed
 file. Offline records are explicitly labelled offline rather than inventing a
 device firmware version. Large records are best loaded on the desktop.
+
+This example uses a finite prepared run, whose `run.program` contains all its
+words. A buffered run exposes a timing/output header instead. Analyse a separate
+finite window when recording a reference for an indefinite program, and label
+that window explicitly; it does not describe the unconsumed future.
 
 `Trace.timestamps` provides hardware-sampled relative input/output timestamps.
 Gate/print timestamps in runtime status are service observations, not precise

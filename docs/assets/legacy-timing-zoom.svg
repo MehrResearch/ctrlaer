@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="215" viewBox="0 0 1200 215">
+<rect width="100%" height="100%" fill="#101827"/>
+<g font-family="sans-serif" font-size="13" fill="#e6edf7">
+<text x="24" y="30" font-size="20">CtrlAer — compiled generator output</text>
+<text x="24" y="54">0.05 ms · 125000000 Hz clock · 96 bytes · edge quantisation ≤ 8 ns</text>
+<text x="24" y="110">GP7</text>
+<text x="24" y="129" fill="#93a5bc">5 pulses</text>
+<path d="M 150.000 130 H 252.000 V 102 H 354.000 V 130 H 456.000 V 102 H 558.000 V 130 H 660.000 V 102 H 762.000 V 130 H 864.000 V 102 H 966.000 V 130 H 1068.000 V 102 H 1170.000 V 130 H 1170.000" fill="none" stroke="#64d8c5" stroke-width="1.5"/>
+<text x="150.000" y="198" text-anchor="middle">0 ms</text>
+<text x="354.000" y="198" text-anchor="middle">0.01 ms</text>
+<text x="558.000" y="198" text-anchor="middle">0.02 ms</text>
+<text x="762.000" y="198" text-anchor="middle">0.03 ms</text>
+<text x="966.000" y="198" text-anchor="middle">0.04 ms</text>
+<text x="1170.000" y="198" text-anchor="middle">0.05 ms</text>
+</g></svg>

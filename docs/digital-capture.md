@@ -29,6 +29,15 @@ finally:
     controller.close()
 ```
 
+![First 50 µs of the expected 100 kHz output](assets/capture-reference.svg)
+
+The figure is the compiled reference for five of the 2000 carrier periods. The
+capture independently samples that output at 8 MS/s (125 ns per sample). Its
+reported comparison, rather than the reference plot, establishes agreement.
+Both state machines observe GP0 on the same chip, so this example needs no
+external connection. For an independent board probe, use the
+[GP6/GND link](wiring.md#two-boards-send-and-verify-in-either-direction).
+
 Input pads must be enabled as inputs or as existing outputs. Capture does not
 change their GPIO function or output direction. It claims only its state machine.
 The finite sampler uses two PIO cycles per sample, limiting the rate to half the
@@ -37,6 +46,8 @@ rate after divider quantisation. The default buffer limit is 64 KiB. Three-chann
 and other non-power-of-two widths are packed correctly, including a partial final
 word. A hardware trigger can choose an edge or level; `wait` has a software timeout
 that stops an untriggered/incomplete capture.
+`Trigger.timeout_ms` is not used by capture; `capture.wait(timeout_ms=...)`
+supplies its overall software deadline, including trigger waiting.
 The sampler stops itself after the packed buffer's final sample. A DMA-induced
 stall raises `ctrlaer_capture.CaptureOverrunError` and marks the trace invalid;
 it is never treated as a uniformly sampled successful capture.
@@ -46,7 +57,10 @@ nanoseconds relative to sample 0. These are hardware-sampled relative timestamps
 GPIO synchronisers and trigger execution introduce a fixed capture-origin offset.
 `write_csv` exports channel-major transition rows; `write_vcd` exports chronological
 digital transitions for a standard waveform viewer. The raw sampled words remain
-available for later analysis.
+available for later analysis. The trace references the capture buffer. Closing
+the capture preserves that data, but rearming/reusing it overwrites the buffer.
+Save or copy a trace before reuse. A HIGH initial sample is an observed level,
+not a sampled LOW-to-HIGH transition; rising-edge counts exclude it.
 
 `trace.compare` checks expected transition levels and times against the exact
 compiled buffer. Its default alignment estimates one common start offset across

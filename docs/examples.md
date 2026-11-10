@@ -1,353 +1,222 @@
-# Examples
+# Worked waveform examples
 
-This page provides various examples demonstrating different features and use cases of CtrlAer.
+These examples use the existing generator vocabulary. Code runs on a board after
+[installation](installation.md); the figures come from the actual desktop
+compiler, at a 125 MHz system clock. A Pico Plus 2 uses its current clock instead.
+The figures describe digital GPIO output, rather than the response of a load.
 
-## Stepper Motor Control
+The [original FIFO recipes](original-recipes.md) explain the pre-existing
+stepper, timing, ultrasonic, blocking and USB-listener scripts, with their
+nominal waveforms and physical connections.
 
-This example demonstrates how to control a stepper motor using two phases. It creates alternating signals that can drive a simple bipolar stepper motor or two coils of a unipolar stepper motor.
+| Example | Output pins | What to observe |
+|---|---|---|
+| Three short bursts | GP6 | Burst envelope and individual carrier periods |
+| Staggered channels | GP0, GP1 | A 5 ms offset between two burst trains |
+| Complementary outputs | GP0, GP1 | Duty cycle and a LOW gap at every handover |
+| Triangular sweep | GP0 | Frequency reversals while carrier phase stays continuous |
+| Repeated hardware triggers | GP0 output, GP6 input | One shot for each edge received while the gate is ready |
 
-### Code
+GPIO numbers differ from header position numbers. The [wiring guide](wiring.md)
+gives physical positions on the Tiny 2040 and Pico Plus 2. Driver inputs and the
+board must share a logic ground. Use a suitable power driver for an atomiser,
+bridge, motor or valve.
 
-```python
-from ctrlaer import mux, HIGH, LOW, CtrlAer
+## Three short bursts
 
-def phase1(n_steps):
-    for i in range(n_steps):
-        yield HIGH, 50  # Energize for 50ms
-        yield LOW, 50   # De-energize for 50ms
+The [getting-started example](getting-started.md#three-short-bursts) generates
+three 2 ms bursts at 40 kHz, each followed by 8 ms LOW. Each burst contains 80
+carrier periods. The source factory is `bursts()` in `examples/patterns.py`.
 
-def phase2(n_steps):
-    for i in range(n_steps):
-        yield LOW, 50   # Start de-energized
-        yield HIGH, 50  # Energize for 50ms
+![Three bursts, with 8 ms LOW after each](assets/first-bursts.svg)
 
-progs = [phase1(10), phase2(10)]
-prog = mux(progs)
+![First 100 µs of the same program](assets/first-bursts-zoom.svg)
 
-# Frequency not critical for this application
-stepper = CtrlAer(sm_number=0, base_pin=0, n_pins=len(progs), freq=10000)
-stepper.run(prog)
-```
+An envelope plot is useful for experiment timing. The zoom is necessary to see
+the LOW-first `ON` command and its 25 µs period.
 
-### How it works
+## Stagger two channels
 
-#### Phase generation
-- `phase1()` and `phase2()` create complementary signals
-- Each phase runs for a specified number of steps
-- Each step consists of a HIGH and LOW period
-- 50ms timing gives a step rate of 10 steps/second
-
-#### Signal pattern
- ```
- Phase 1: ▁▁▁▁█████▁▁▁▁█████▁▁▁▁
- Phase 2: ▁▁▁▁▁▁▁▁▁█████▁▁▁▁█████
- ```
-
-#### Hardware setup
-
-- Components needed:
-  - Raspberry Pi Pico
-  - Bipolar stepper motor or half of a unipolar stepper
-  - Motor driver (e.g., L298N, A4988)
-  - Power supply for the motor
-
-- Connections:
-  ```
-  Pico GP0 → Driver Input 1
-  Pico GP1 → Driver Input 2
-  Driver Outputs → Motor Coils
-  ```
-
-- Safety notes:
-  - Never connect the motor directly to the Pico
-  - Use a proper motor driver rated for your motor's current
-  - Ensure your power supply can handle the motor's requirements
-
-## Ultrasonic Control
-
-This example demonstrates how to generate audio and ultrasonic signals with precise timing control. The audio signal is at 100Hz, and the ultrasonic signal is at the PIO frequency `freq`. The latter is also generated with 180 degree phase shift for use with an H-bridge driver to drive an ultrasonic transducer array.
-
-### Code
+Channel A produces the same 2 ms / 8 ms pattern. Channel B starts each burst
+5 ms later. Both generators last 30 ms; `mux()` keeps their relative timing
+while assigning them to GP0 and GP1.
 
 ```python
-from ctrlaer import mux, HIGH, LOW, OFF, PULSE01, PULSE10, CtrlAer
+from ctrlaer import CtrlAer, ON, OFF, mux
 
-def low_freq():
-    while True:
-        yield HIGH, 5  # 5ms on
-        yield LOW, 5   # 5ms off
+def a():
+    for _ in range(3):
+        yield ON, 2
+        yield OFF, 8
 
-def phase1():
-    while True:
-        yield PULSE01, 10    # 10ms pulse
-        yield OFF, 1000     # 1s off
+def b():
+    for _ in range(3):
+        yield OFF, 5
+        yield ON, 2
+        yield OFF, 3
 
-def phase2():
-    while True:
-        yield PULSE10, 10    # 10ms pulse
-        yield OFF, 1000     # 1s off
-
-progs = [low_freq(), phase1(), phase2(), phase1(), phase2()]
-prog = mux(progs)
-
-speaker = CtrlAer(sm_number=0, base_pin=0, n_pins=len(progs), freq=40000)
-speaker.run(prog)
+controller = CtrlAer(0, base_pin=0, n_pins=2, freq=40000)
+try:
+    controller.prepare(mux([a(), b()])).start().wait(1000)
+finally:
+    controller.close()
 ```
 
-### How it works
+![GP1 bursts start 5 ms after GP0 bursts](assets/staggered.svg)
 
-#### Signal generation
-- Three types of signals are generated:
-    - `low_freq()`: A simple audio signal at 100Hz (5ms on, 5ms off)
-    - `phase1()`: PULSE01 pattern with 1-second gaps
-    - `phase2()`: PULSE10 pattern with 1-second gaps
+Connect GP0 and GP1 to separate logic inputs on your drivers, and join their
+logic grounds to board GND. The diagram shows burst envelopes; each band contains
+80 periods of the same LOW-first carrier shown above. Exhausted `mux()` channels
+become LOW while any remaining channel continues.
 
-#### Signal patterns
-```
-Carrier:   ▄▄▄▄▄▁▁▁▁▁▄▄▄▄▄▁▁▁▁▁
-Phase 1:   ▁█▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁█▁▁▁
-Phase 2:   ▁▁▁█▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁█▁
-```
+The equivalent reusable factory is `staggered()` in `examples/patterns.py`.
+For different independent carrier frequencies, see [groups](triggers-and-groups.md#independent-waveform-groups).
 
-#### Hardware setup
+## Set duty cycle and complementary dead time
 
-- Components needed:
-  - Raspberry Pi Pico
-  - Ultrasonic transducers
-  - Appropriate drivers/amplifiers if needed
-  - Power supply
-
-- Connections:
-  ```
-  GP0 → Audio amplifier
-  GP1-4 → H-bridge
-  ```
-
-## Blocking Operations
-
-This example demonstrates advanced control flow using blocking operations and external pin control. It implements a complex timing pattern with variable durations and coordinated actions.
-
-### Code
+This 0.2 ms burst has a 40 kHz carrier: eight periods of 25 µs. The ideal A
+waveform is HIGH for 40% of a period. Its complementary partner has the remaining
+60%. A 200 ns turn-on delay leaves both outputs LOW at every handover.
 
 ```python
-from ctrlaer import ON, OFF, mux, CtrlAer
+from ctrlaer import CtrlAer, pulse, mux
+
+def a():
+    yield pulse(40000, duty=.4, dead_time_ns=200), .2
+
+def b():
+    yield pulse(40000, duty=.4, complement=True, dead_time_ns=200), .2
+
+controller = CtrlAer(0, base_pin=0, n_pins=2)
+try:
+    controller.prepare(mux([a(), b()])).start().wait(1000)
+finally:
+    controller.close()
+```
+
+![First four periods of the complementary outputs](assets/complementary.svg)
+
+The 100 µs view shows four of the eight periods. GP0 turns on 200 ns after each
+ideal rising edge, turns off at the ideal falling edge, and GP1 turns on 200 ns
+later. The delay reduces actual HIGH time; it is not added to the period.
+Both return LOW at completion. Connect GP0/GP1 to the two compatible logic
+inputs of the intended driver, with common GND.
+
+`phase=.25` would delay the first ideal rising edge by one quarter of a cycle.
+Apply matching carrier settings to complementary partners. Impossible duty/dead
+time combinations and intervals below six system-clock ticks fail preparation.
+The source factory is `complementary()` in `examples/patterns.py`.
+
+## Sweep repeatedly within one pulse
+
+The pulse lasts 20 ms. Its frequency goes from 90 kHz to 120 kHz in 2 ms, returns
+in another 2 ms, then repeats. The pulse therefore contains five complete
+frequency triangles and 2100 carrier cycles. Changing pulse duration clips this
+same trajectory; it does not change the sweep rate.
+
+```python
+from ctrlaer import CtrlAer, chirp, OFF, print
+
+def experiment(pulse_ms=20, sweep_ms=2):
+    print("adiabatic shot", pulse_ms, sweep_ms)
+    yield chirp(90000, 120000, sweep_ms=sweep_ms), pulse_ms
+    yield OFF, 100
+
+controller = CtrlAer(0, base_pin=0, n_pins=1)
+try:
+    controller.prepare(experiment()).start().wait(1000)
+finally:
+    controller.close()
+```
+
+![A 20 ms chirp burst followed by a 100 ms rest](assets/adiabatic.svg)
+
+![Frequency across the ON section, checked against compiled periods](assets/chirp-frequency.svg)
+
+![First 100 µs of the compiled timeline, including notification overhead](assets/adiabatic-zoom.svg)
+
+The frequency graph starts at the beginning of the ON section. It shows the
+requested trajectory and frequency estimates from compiled rising-edge periods.
+Carrier phase remains continuous at every reversal. `chirp` defaults to a
+20 ms **one-way** sweep when `sweep_ms` is omitted; it does not infer a sweep rate
+from the pulse duration.
+
+The imported `print` is CtrlAer's managed notification. It becomes an event in
+the compiled schedule, with two 512-tick control packets before the ON section
+(8.192 µs at 125 MHz). Its console text is serviced by Python; notification latency
+does not retime the carrier. The actual GPIO schedule includes that fixed
+overhead, which is visible before the first pulse in the zoom.
+
+Connect GP0 to the driver's logic input and common GND. Electrical waveform
+verification does not establish the atomiser's mechanical or aerosol response.
+The parameterised source is `examples/adiabatic.py`; see
+[scans and records](analysis-and-records.md) for exploring parameters and saving
+exact programs. Use buffered mode for a repeating unbounded generator, subject
+to the [production envelope](performance.md).
+
+## Wait for another trigger on every shot
+
+This program runs indefinitely. It waits for LOW then HIGH on GP6, produces a
+20 ms burst on GP0, holds GP0 LOW for 100 ms, and returns to the next gate.
+Edges during the burst or rest are not queued for later shots.
+
+```python
+from ctrlaer import CtrlAer, pulse, OFF, wait_for
 from machine import Pin
-from time import sleep
 
-N = 50          # Number of steps
-n = 10          # Repetitions per step
-analysis_delay = 5
-reaction_delay = 1
-off_time = 250
-on_time = 100
+Pin(6, Pin.IN, Pin.PULL_DOWN)
 
-ctrlaer = CtrlAer(sm_number=0, base_pin=7, n_pins=2, freq=111_500)
+def shots():
+    while True:
+        wait_for(6, timeout_ms=None)
+        yield pulse(108050), 20
+        yield OFF, 100
 
-air_control = Pin(16, Pin.OUT)
-air_control.value(0)
-sleep(2)
-
-def amine():
-    for i in range(N):
-        amine_time = int(on_time * i / (N - 1))
-        for j in range(n):
-            yield OFF, on_time - amine_time
-            yield ON, amine_time
-            yield OFF, off_time
-        ctrlaer.block()
-        sleep(reaction_delay)
-        air_control.value(1)
-        sleep(analysis_delay)
-        air_control.value(0)
-
-def aldehyde():
-    for i in range(N):
-        aldehyde_time = int(on_time * (N - 1 - i) / (N - 1))
-        for j in range(n):
-            yield OFF, on_time - aldehyde_time
-            yield ON, aldehyde_time
-            yield OFF, off_time
-
-prog = mux([amine(), aldehyde()])
-ctrlaer.run(prog)
+controller = CtrlAer(0, base_pin=0, n_pins=1)
+try:
+    run = controller.prepare(shots, mode="buffered")
+    run.start().wait()
+finally:
+    controller.close()
 ```
 
-### How it works
+![Two shots at nominal positions; external wait durations are additional](assets/triggered.svg)
 
-#### Setup
-- Creates a controller with 2 pins starting at GP7
-- Sets up a separate pin for manual control of solenoid valve on GP16
-- Initializes timing parameters:
-    - 50 steps with variable durations
-    - Delays for reactions and analysis
-    - Fixed off time and maximum on time
+This figure compiles two iterations of the same pattern. Dashed markers identify
+gates at their **nominal** positions. No duration is invented for the unknown
+external waits; a real capture can contain arbitrarily long LOW intervals there.
+Fixed gate-control overhead is included. A shot starts only after the gate is
+ready and the requested edge is received.
 
-#### Signal generation
-- Two complementary generators are used to demonstrate changing stoichiometry
-    - `amine()`: Increasing ON time
-    - `aldehyde()`: Decreasing ON time
-- Each step includes:
-    - Variable ON time
-    - Fixed OFF time
-    - Optional repetitions
+Connect a 3.3 V trigger source to GP6 and its GND to board GND. GP0 is the drive
+output; the [physical wiring guide](wiring.md#trigger-an-experiment) identifies
+both boards' pads. Stop with `run.abort()` from application code, or interrupt
+the synchronous wait; `finally` closes the engine. `timeout_ms=None` is an
+unbounded gate wait, whereas a numeric timeout is supervised in software.
+See [trigger semantics](triggers-and-groups.md) for edge preconditions, timeout
+latency and rearming. `triggered()` in `examples/patterns.py` provides a finite
+version for analysis.
 
-#### Control flow
-- Each amine cycle:
-    1. Generate pulses with increasing duration
-    2. Wait for completion (`block()`)
-    3. Wait for reaction to complete
-    4. Activate air control
-    5. Wait for reaction products to clear out of the analyzer
-    6. Deactivate air control
-- Aldehyde runs independently with decreasing durations
+## Use Python measurements between commands
 
-#### Hardware setup
+[Eager execution](execution-modes.md#eager-measurements-and-ordinary-python-in-sequence)
+finishes a yielded command before advancing Python. Choose it when an ADC
+reading or other ordinary Python operation must happen after that command.
+Each command still uses PIO/DMA, while gaps between commands include interpreter
+and preparation time. The last digital level is held during those gaps; issue
+an explicit OFF command first when a measurement needs deasserted output.
 
-- Components needed:
-  - Raspberry Pi Pico
-  - 2 vibrating mesh atomizers and drivers
-  - Solenoid valve and MOSFET driver + freewheeling diode
-  - External power supply for valve and aerosol VMAs (typically 6-12V)
+![Eager execution order and variable Python gaps](assets/eager-order.svg)
 
-- Connections:
-  ```
-  Pico GP7  → Amine control
-  Pico GP8  → Aldehyde control
-  Pico GP16 → Solenoid valve
-  ```
+## Reproduce the figures
 
-## Serial Command Control
+From the checkout on your computer:
 
-This example demonstrates how to control CtrlAer through serial communication from a host computer. The Pico listens for commands in a specific format and executes them in real-time.
-
-### Pico Code (listen.py)
-
-```python
-from ctrlaer import CtrlAer
-from sys import stdin
-
-ctrlaer = CtrlAer(sm_number=0, base_pin=0, n_pins=1, freq=5000)
-
-ctrlaer.listen(stdin)
+```sh
+uv run tools/build_figures.py
 ```
 
-### Host Computer Code (Python with PySerial)
-
-```python
-import serial
-import time
-
-# Open serial connection to Pico
-ser = serial.Serial('/dev/ttyACM0', 115200)  # Adjust port as needed
-# On Windows, this might be 'COM3' or similar
-# On macOS, this might be '/dev/tty.usbmodem14101' or similar
-
-# Wait for connection to establish
-time.sleep(1)
-
-# Define commands as (state, duration_ms)
-commands = [
-    (2, 100),   # ON for 100ms (PULSE10)
-    (0, 200),   # OFF for 200ms
-    (3, 150),   # HIGH for 150ms
-    (0, 200),   # OFF for 200ms
-    (1, 100),   # PULSE01 for 100ms
-]
-
-# Send commands
-for state, duration in commands:
-    cmd = f"{state},{duration}\r\n"
-    ser.write(cmd.encode())
-    # Wait for acknowledgment (optional)
-    response = ser.readline().decode().strip()
-    print(f"Sent: {cmd.strip()}, Response: {response}")
-
-# End the listening session
-ser.write(b"END\r\n")
-ser.close()
-```
-
-### How it works
-
-#### Command format
-- Commands are sent as text in the format: `<state>,<duration>`
-- `state`: Integer value corresponding to CtrlAer constants:
-  - `0`: LOW/OFF (constant low)
-  - `1`: PULSE01 (square wave starting HIGH)
-  - `2`: PULSE10/ON (square wave starting LOW)
-  - `3`: HIGH (constant high)
-- `duration`: Time in milliseconds
-- Special command `END` terminates the listening session
-
-#### Implementation details
-- The `listen()` method on the CtrlAer instance creates a generator that:
-  1. Reads lines from the input stream (stdin)
-  2. Parses each line into a state and duration
-  3. Yields these as commands to be executed
-  4. Echoes back the command for acknowledgment
-  5. Terminates when "END" is received
-
-#### Example applications
-- Remote control of experiments
-- Integration with data acquisition systems
-- Automated testing sequences
-- Synchronized multi-device operation
-
-#### Hardware setup
-- Raspberry Pi Pico connected via USB to host computer
-- Output devices connected to GP0 (adjust as needed)
-- No additional components required for basic operation
-
-## Timing Control Options
-
-This example demonstrates how to control timing using either milliseconds (default) or carrier period counts.
-
-### Code
-
-```python
-from ctrlaer import ON, OFF, CtrlAer
-from time import sleep
-
-FREQ = 100_000  # 100 kHz
-ctrlaer = CtrlAer(sm_number=0, base_pin=7, n_pins=1, freq=FREQ)
-
-def step_ms():
-    # Use millisecond timing (default)
-    for _ in range(5):
-        yield ON, 200    # 200 ms square wave
-        yield OFF, 200   # 200 ms off
-
-ctrlaer.run(step_ms())  # use_ms=True by default
-
-def step_ticks():
-    # Specify in ticks (square wave counts)
-    # 20000 ticks = 20000 * 1 / FREQ = 200 ms
-    for _ in range(5):
-        yield ON, 20000   # 20000 ticks square wave (200 ms)
-        yield OFF, 20000  # 20000 ticks off (200 ms)
-
-ctrlaer.run(step_ticks(), use_ms=False)  # Explicitly specify raw ticks
-```
-
-### How it works
-
-#### Timing options
-- `use_ms=True` (default): Timing specified in milliseconds
-  - Intuitive for human-readable code
-  - CtrlAer automatically converts to appropriate number of ticks
-  
-- `use_ms=False`: Timing specified in raw PIO clock ticks
-  - Precise control over the number of carrier periods
-  - Allows defining signals in terms of period count rather than duration
-
-#### Use cases
-- Use milliseconds for:
-  - Most general-purpose applications
-  - When timing is conceptualized in terms of real-world duration
-  - More readable and maintainable code
-
-- Use raw ticks for:
-  - Applications where the exact number of cycles matters
-  - Synchronizing with external hardware that operates on cycle counts
-  - Creating precise frequency relationships where ratios of ticks matter more than absolute time
-  - When working with very fast signals where rounding to milliseconds would cause timing errors
+The script regenerates these waveforms from the real compiler and the source
+factories. Its PEP 723 metadata supplies Matplotlib for the frequency figure.
+It contacts no board. The wiring diagram is separately checked against the
+manufacturer's pinouts.
