@@ -4,6 +4,13 @@ from ctrlaer_program import CompiledProgram, compile_program, integer, number
 
 
 def program_to_dict(program, include_words=True):
+    """Validate a finite program and return `ctrlaer.program/v1` metadata.
+
+    With `include_words=True` (default), copies uint32 packets into a Python
+    list under `words`, useful for desktop JSON. False omits that large list;
+    retain the words separately or use streamed experiment records. Nested
+    metadata is shared with the program and should be treated as immutable.
+    """
     program.validate()
     result = program.summary()
     result.update({"schema": "ctrlaer.program/v1", "requested_ticks": program.requested_ticks})
@@ -13,6 +20,14 @@ def program_to_dict(program, include_words=True):
 
 
 def program_from_dict(data, words=None):
+    """Decode/validate `ctrlaer.program/v1` data and return a `CompiledProgram`.
+
+    `words` optionally supplies the packet buffer separately; otherwise uses
+    `data['words']`. Every word is checked and copied into a uint32 array, then
+    executable packets and statistics are validated. Invalid data/schema raises
+    `ValueError`; missing required fields can raise `KeyError`. No generator or
+    hardware is executed.
+    """
     if data.get("schema") != "ctrlaer.program/v1":
         raise ValueError("unsupported compiled-program schema")
     n_pins = integer(data["n_pins"], "n_pins", 1, 16)
@@ -35,7 +50,18 @@ def program_from_dict(data, words=None):
 
 
 def parameter_scan(factory, axes, fixed=None, max_trials=10000, **compile_options):
-    """Compile fresh generators from a Python factory in sorted-axis order."""
+    """Yield `(trial_index, parameter_dict, compiled_program)` for a parameter grid.
+
+    `factory` must return a fresh generator. `axes` maps parameter names to
+    nonempty value iterables; names are sorted for stable Cartesian-product
+    ordering. `fixed` supplies other keyword parameters without overlapping the
+    axes. `max_trials` bounds the product (default 10000); invalid/empty grids
+    raise `ValueError`. Other keywords are `compile_program` options.
+
+    Each trial invokes the factory independently, so ordinary Python side
+    effects execute again. Parameter binding is retained in the resulting
+    program. No output hardware is claimed and no physical experiment is run.
+    """
     if not callable(factory):
         raise ValueError("scans need a generator factory, not an exhausted iterator")
     integer(max_trials, "max_trials", 1, 1000000000)
@@ -70,7 +96,18 @@ def _escape(value):
 
 
 def render_svg(program, window_ms=None, width=1200, max_edges=10000):
-    """Render the exact compiled digital timeline; no recipe/generator is run."""
+    """Return an SVG string showing exact compiled edges from nominal time zero.
+
+    `program` is a finite `CompiledProgram`. `window_ms` optionally limits the
+    displayed prefix (positive milliseconds); `None` shows the whole program.
+    `width` is 400–10000 pixels, default 1200. `max_edges` bounds rendered edges
+    across channels, default 10000; choose a shorter prefix when exceeded.
+
+    Labels include channels, pulses, clock and quantisation; gates/effects are
+    marked at nominal positions. Unknown external waiting time is not plotted
+    as an invented interval. No generator is run and no hardware is contacted.
+    Invalid limits or too many displayed edges raise `ValueError`.
+    """
     integer(width, "width", 400, 10000)
     integer(max_edges, "max_edges", 1, 10000000)
     if window_ms is not None:

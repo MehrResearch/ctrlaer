@@ -4,10 +4,29 @@ from ctrlaer_program import integer, number, rounded
 
 
 class CaptureOverrunError(RuntimeError):
-    pass
+    """The capture PIO stalled because DMA could not drain its receive FIFO.
+
+    The capture stops in state `error`. A partial trace is retained with
+    `metadata['overrun']=True`; its timestamps cannot be used for waveform
+    comparison. `Trace.compare` rejects such traces.
+    """
 
 
 class Trace:
+    """Portable packed digital samples returned by capture or record loading.
+
+    `words` is a uint32 buffer, `n_pins` is 1–16 contiguous channels, `samples`
+    is the number of valid samples (possibly zero for an early abort), and
+    `sample_hz` is the achieved sample rate. Each word packs `32 // n_pins`
+    samples; unused bits/last-word samples are ignored. Use `levels`/`edges`
+    rather than decoding the packing yourself.
+
+    Optional `names` supplies one label per channel; defaults are CH0, CH1, etc.
+    `metadata` is copied into a dictionary. Channel 0 is the least-significant
+    bit of each decoded sample mask. The object references its input word buffer
+    without copying: rearming its `DigitalCapture` overwrites that same memory.
+    Save/copy a trace before reusing the capture when it must be retained.
+    """
     def __init__(self, words, n_pins, samples, sample_hz, names=None, metadata=None):
         self.n_pins = integer(n_pins, "capture n_pins", 1, 16)
         self.samples = integer(samples, "samples", 0, 1000000000)
@@ -24,9 +43,11 @@ class Trace:
 
     @property
     def duration_ms(self):
+        """Valid sample count divided by achieved sample rate, in milliseconds."""
         return self.samples * 1000 / self.sample_hz
 
     def levels(self):
+        """Yield one integer channel mask per valid sample in chronological order."""
         mask = (1 << self.n_pins) - 1
         remaining = self.samples
         for word in self.words:
@@ -52,6 +73,11 @@ class Trace:
             yield sample * 1e9 / self.sample_hz, level
 
     def summary(self):
+        """Return channel names, samples/rate, duration, resolution, metadata and rise counts.
+
+        Rising-edge counts exclude the initial sample. An initial HIGH is an
+        observation, not evidence of a sampled LOW-to-HIGH transition.
+        """
         return {"n_pins": self.n_pins, "names": self.names, "samples": self.samples,
                 "sample_hz": self.sample_hz, "duration_ms": self.duration_ms,
                 "resolution_ns": 1e9 / self.sample_hz, "metadata": self.metadata,
@@ -59,6 +85,12 @@ class Trace:
                                   for i in range(self.n_pins)]}
 
     def write_csv(self, stream):
+        """Write a transition CSV to a text stream; return `None`.
+
+        Columns are `sample,time_ns,channel,level`, including each channel's
+        initial level. Rows are channel-major for bounded-memory export, so the
+        file is not globally sorted by timestamp. Time starts at sample zero.
+        """
         stream.write("sample,time_ns,channel,level\n")
         # Channel-major ordering makes the export streamable on a small board.
         for channel in range(self.n_pins):
@@ -67,6 +99,12 @@ class Trace:
                              (sample, sample * 1e9 / self.sample_hz, channel, level))
 
     def write_vcd(self, stream):
+        """Write a VCD transition trace to a text stream; return `None`.
+
+        Uses a 1 ns timescale, rounded sample timestamps and initial levels.
+        Channel names are sanitised for identifiers. Suitable for desktop VCD
+        viewers; actual timing resolution remains one sample period.
+        """
         stream.write("$timescale 1ns $end\n$scope module ctrlaer $end\n")
         for channel, name in enumerate(self.names):
             safe = "".join(c if c.isalnum() or c == '_' else '_' for c in name)
@@ -89,6 +127,24 @@ class Trace:
         channels maps logical program channels to capture channels. Alignment uses
         one common offset for every channel. Gate waits must be supplied explicitly
         in output-clock ticks, since they are not fixed by a compiled timeline.
+
+        - `program`: a finite `CompiledProgram`.
+        - `tolerance_ns`: non-negative edge tolerance; defaults to one sample.
+        - `align_first_edge`: shift all expected channels by one common offset
+          derived from the first usable transition. Does not fit clock drift.
+        - `channels`: dictionary `{program_channel: capture_channel}`; omitted
+          means identity mapping and requires matching channel counts.
+        - `gate_wait_ticks`: one measured external wait per gate in program-clock
+          ticks, excluding the already compiled fixed control overhead.
+        - `max_errors`: maximum detailed errors retained; all mismatches are counted.
+        - `require_complete`: true by default. A matching partial window remains
+          inconclusive rather than passing a whole-program verification.
+
+        Returns `passed`, `mismatches`, `compared_edges`, `alignment_ns`,
+        `tolerance_ns`, `errors`, `inconclusive`, and a `coverage` dictionary.
+        Coverage checks the earliest required edge through the nominal program
+        end, including a possible quiet prefix omitted by triggering. Invalid
+        mapping/gate data, empty captures and overrun traces raise `ValueError`.
         """
         if self.metadata.get("overrun"):
             raise ValueError("an overrun trace does not have reliable sample timestamps")
@@ -225,6 +281,25 @@ class DigitalCapture:
 
     Input pads must have their input buffer enabled (Pin.IN or a live output).
     Capturing an output does not change its GPIO function or direction.
+
+    `sm_number` is a free global PIO state-machine index; `base_pin` is GPIO0–29
+    for channel 0, followed by `n_pins` contiguous inputs (1–16). Supply exactly
+    one of `samples` (positive integer) or `duration_ms` (positive milliseconds).
+    `sample_hz` defaults to 10 MHz and must fit a two-clock sampler's divider:
+    system clock / (2 * 65536) through system clock / 2. The achieved rate is
+    reported in `sample_hz`; it can differ slightly from the requested rate.
+
+    `trigger` optionally supplies a `Trigger` pin/edge/level before sampling.
+    Its per-gate `timeout_ms` is not used for capture: set the overall deadline
+    in `wait()`, which includes waiting for the trigger. Sample zero is the first
+    sampled value after the PIO wait, with normal GPIO synchroniser latency.
+
+    `names` supplies one channel label. `max_bytes` bounds the packed allocation
+    (default 65536). One state machine and one DMA channel are claimed. Oversized
+    buffers/invalid options raise `ValueError`; resource allocation can fail.
+    Construction arms an inactive capture; call `start()`, then `wait()` for a
+    `Trace`. Supports `with` for closing on exit. Captures are finite; partial
+    abort data counts only complete DMA words.
     """
     def __init__(self, sm_number, base_pin, n_pins=1, sample_hz=10000000,
                  samples=None, duration_ms=None, trigger=None, names=None, max_bytes=65536):
@@ -277,6 +352,12 @@ class DigitalCapture:
             raise
 
     def arm(self):
+        """Reset an inactive open capture to `prepared`; return this capture.
+
+        Reuses its packed sample buffer, overwriting data referenced by an old
+        trace on the next acquisition. Clears error/overrun/trace state. Active,
+        closed or changed-clock captures raise `RuntimeError`.
+        """
         from machine import Pin, freq, mem32
         from rp2 import DMA
         if self.closed or self.state == "running":
@@ -313,6 +394,11 @@ class DigitalCapture:
         return self
 
     def start(self):
+        """Enable sampling or its trigger wait; return this capture in `running` state.
+
+        Requires an open prepared capture and the original system clock.
+        Does not wait for a trigger or for acquisition to finish.
+        """
         from machine import freq
         from ctrlaer_runtime import enable_mask
         if self.state != "prepared" or self.closed:
@@ -341,6 +427,13 @@ class DigitalCapture:
         self.state = "done" if complete else "aborted"
 
     def poll(self):
+        """Service finite completion/overrun and return the capture state string.
+
+        `running` also includes waiting for a trigger. A receive stall stops
+        capture and raises `CaptureOverrunError`; a clock change aborts and
+        raises `RuntimeError`. Successful completion creates `trace` and sets
+        state `done`. GPIO sampling itself runs entirely in PIO/DMA.
+        """
         from machine import freq, mem32
         if self.state == "running" and freq() != self.clock_hz:
             self.abort()
@@ -359,6 +452,13 @@ class DigitalCapture:
         return self.state
 
     def wait(self, timeout_ms=1000):
+        """Wait for acquisition and return its `Trace`, or raise an execution error.
+
+        Default deadline is 1000 ms, including the trigger wait; positive
+        milliseconds or `None` for no deadline are accepted. Timeout aborts and
+        raises `ExecutionTimeoutError`, retaining any complete-word partial
+        trace. A closed/never-started capture raises `RuntimeError`.
+        """
         from time import ticks_ms, ticks_diff, sleep_ms
         from ctrlaer_runtime import ExecutionTimeoutError
         if self.closed or self.state == "prepared":
@@ -376,11 +476,22 @@ class DigitalCapture:
         return self.trace
 
     def abort(self):
+        """Stop an active/prepared capture and return its partial `Trace`.
+
+        Complete DMA words are retained; a not-yet-pushed word is omitted. An
+        already terminal capture returns its existing trace. Hardware ownership
+        remains until `close()`; `arm()` permits another acquisition.
+        """
         if self.state in ("prepared", "running"):
             self._finish(False)
         return self.trace
 
     def close(self):
+        """Abort if needed and release capture PIO/DMA resources; return `None`.
+
+        Idempotent. The trace/word buffer remains available for inspection or
+        export after closing. A closed capture cannot be armed again.
+        """
         from rp2 import PIO
         from ctrlaer_runtime import release
         if self.closed:

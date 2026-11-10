@@ -23,6 +23,11 @@ def _chunks(words):
 
 
 def fingerprint(words):
+    """Return a hexadecimal SHA-256 of uint32 words encoded little endian.
+
+    Hashes are independent of the host's byte order. Input words must fit in four
+    unsigned bytes. Processing uses bounded chunks without a second full buffer.
+    """
     import hashlib
     import binascii
     digest = hashlib.sha256()
@@ -56,6 +61,13 @@ def _read_buffer(data):
 
 
 def device_info():
+    """Return firmware/board/clock identity, or desktop Python identity offline.
+
+    MicroPython results include implementation/version, full firmware string,
+    `os.uname()`, board name and current clock in Hz. Desktop results include
+    `execution='offline'`, implementation and Python version. No board is opened
+    or contacted by the desktop function.
+    """
     import sys
     implementation = sys.implementation
     if implementation.name != "micropython":
@@ -70,7 +82,25 @@ def device_info():
 
 
 def save_record(path, program, run=None, trace=None, results=None, metadata=None, device=None):
-    """Atomically save parameters, exact buffers, device version and results."""
+    """Save a finite compiled experiment and optional capture/status as JSON.
+
+    `path` is a filesystem path, `program` a validated `CompiledProgram`. Optional
+    `run` contributes its `status()`, `trace` its exact packed samples, and
+    `results`/`metadata` user dictionaries. `device` overrides `device_info()`
+    when saving data from another board. User metadata must be JSON serialisable.
+
+    Writes `ctrlaer.experiment/v1` with little-endian base64 buffers and SHA-256
+    fingerprints. Buffer encoding is streamed rather than building a full list
+    or base64 string in device RAM. A sibling `.tmp` is closed/synced before
+    renaming to the destination; filesystem/power-loss guarantees depend on the
+    platform. Errors remove the temporary file when possible and propagate.
+    Returns the destination path as a string.
+
+    Save after playback stops or during a deliberate hardware-gated pause:
+    validation, status collection, capture summarisation and filesystem writes
+    can block the interpreter. An unbounded future is not a `CompiledProgram`;
+    analyse a separate finite window when a packet artifact is required.
+    """
     import os
     program.validate()
     path = str(path)
@@ -108,7 +138,18 @@ def save_record(path, program, run=None, trace=None, results=None, metadata=None
 
 
 def load_record(path):
-    """Load and validate a record, returning decoded program and Trace objects."""
+    """Load/validate a `ctrlaer.experiment/v1` record; return its decoded dictionary.
+
+    `program` becomes a validated `CompiledProgram`; optional `capture` becomes a
+    `Trace`. Encoded buffer fields are replaced by those objects. Parameters,
+    device, execution status, results and user metadata remain in the dictionary.
+    Buffer lengths/hashes and the duplicated parameter binding are checked.
+    Unsupported/corrupt data raises `ValueError`; I/O/JSON errors propagate.
+
+    Loading holds the JSON and decoded buffers in memory, so large records are
+    best opened on desktop Python. This function does not execute a waveform or
+    rerun its original generator.
+    """
     with open(path) as stream:
         data = json.load(stream)
     if data.get('schema') != 'ctrlaer.experiment/v1':

@@ -194,12 +194,14 @@ class WaveTests(unittest.TestCase):
         import math
         f0,f1,leg=90100,123400,.0017
         p=compile_program([(chirp(f0,f1,sweep_ms=leg*1000,phase=.25),17)])
+        self.assertLessEqual(p.quantisation_ns,1e9/p.clock_hz)
         rises=[tick for tick,value in p.edges(0) if value]
         for index,tick in enumerate(rises):
             time=tick/p.clock_hz;part=math.floor(time/leg);local=time-part*leg
             start=f1 if part%2 else f0;slope=(f0-f1 if part%2 else f1-f0)/leg
             phase=part*(f0+f1)*leg/2+start*local+.5*slope*local*local
-            self.assertLessEqual(abs(phase-index-.25),max(f0,f1)/p.clock_hz/2+1e-6)
+            self.assertLessEqual(abs(phase-index-.25),
+                                 max(f0,f1)*p.quantisation_ns/1e9+1e-6)
 
 
 if __name__ == '__main__':

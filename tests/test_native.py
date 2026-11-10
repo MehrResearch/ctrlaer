@@ -48,13 +48,13 @@ class NativeEdgesTests(unittest.TestCase):
                              self.ticks(command,125000000,parts=[1,7,511,1024,2,3455]))
 
     def test_native_coordinate_rollover_preserves_absolute_time(self):
-        command=pulse(108050)
-        cursor=CarrierEdges.create(command,125000000)
-        cursor.state[13]=0x20000000
-        output=words(4);cursor.fill_into(output,4)
-        shifted=[cursor.origin+tick for tick in output]
-        baseline=[0x20000000+tick for tick in self.ticks(command,125000000,count=4)]
-        self.assertEqual(shifted,baseline)
+        for command in (pulse(108050),chirp(90100,123400,sweep_ms=1.7,phase=.25)):
+            cursor=CarrierEdges.create(command,125000000)
+            cursor.state[13]+=0x20000000
+            output=words(4);cursor.fill_into(output,4)
+            shifted=[cursor.origin+tick for tick in output]
+            baseline=[0x20000000+tick for tick in self.ticks(command,125000000,count=4)]
+            self.assertEqual(shifted,baseline)
 
     def test_periodic_chirp_cache_repeats_carrier_phase_and_is_bounded(self):
         for clock in (125000000, 150000000):
@@ -70,7 +70,7 @@ class NativeEdgesTests(unittest.TestCase):
                 observed = [tick for tick in output if tick < clock * .032]
                 self.assertEqual(len(observed), len(expected))
                 self.assertLessEqual(max(abs(a-b) for a,b in zip(observed, expected)), 1)
-                self.assertEqual(sum(len(part) for part in cursor._cache), 1680)
+                self.assertEqual(len(cursor._cache[1]), 840)
                 # Skip ahead to an exact cached period after the native signed
                 # coordinate limit, without allocating a several-second trace.
                 group = 0x20000000 // cursor._period + 1
@@ -78,12 +78,73 @@ class NativeEdgesTests(unittest.TestCase):
                 cursor.fill_into(output, 2)
                 self.assertEqual(cursor.origin, group * cursor._period)
                 self.assertEqual(list(output[:2]),
-                                 [tick - cursor._period for tick in cursor._cache[1][:2]])
+                                 [cursor._cache[2],cursor._cache[2]+cursor._cache[1][0]+cursor._cache[3]])
+
+    def test_default_sweep_uses_one_bounded_period_without_long_term_phase_error(self):
+        for clock in (125000000,150000000):
+            for options in ({'phase':.37,'duty':.3},
+                            {'complement':True,'dead_time_ns':200}):
+                command=chirp(90000,120000,**options)
+                cursor=CarrierEdges.create(command,clock)
+                self.assertEqual(cursor._period_edges,8400)
+                output=words(8400*5)
+                cursor.fill_into(output,len(output))
+                expected=[round(t*clock) for t,_,_ in
+                          _analytic_carrier_events(command,.16,0,0,clock)]
+                observed=[t for t in output if t<clock*.16]
+                self.assertEqual(len(observed),len(expected))
+                self.assertLessEqual(max(abs(a-b) for a,b in zip(observed,expected)),1)
+                self.assertLessEqual(len(cursor._cache[1])*2,20000)
+
+    def test_compact_interval_cache_retains_exact_ticks_with_half_the_storage(self):
+        for clock in (125000000,150000000):
+            command=chirp(90000,120000)
+            compact=CarrierEdges.create(command,clock)
+            reference=CarrierEdges.create(command,clock)
+            reference._cache_base=0
+            actual,expected=words(10000),words(10000)
+            compact.fill_into(actual,len(actual))
+            reference.fill_into(expected,len(expected))
+            self.assertEqual(actual,expected)
+            self.assertEqual(len(compact._cache[0]),4200)
+            self.assertEqual(len(reference._cache[0]),8400)
+
+    def test_symmetric_chirp_cache_folds_only_aligned_half_cycles(self):
+        for clock in (125000000,150000000):
+            for options in ({},{'phase':.1},{'duty':.4},{'dead_time_ns':200}):
+                command=chirp(90000,120000,**options)
+                cursor=CarrierEdges.create(command,clock)
+                actual=words(16800);cursor.fill_into(actual,len(actual))
+                expected=[round(time*clock) for time,_,_ in
+                          _analytic_carrier_events(command,.08,0,0,clock)]
+                self.assertEqual(cursor._cache[4],not options)
+                self.assertEqual(len(cursor._cache[1]),4200 if not options else 8400)
+                self.assertLessEqual(max(abs(a-b) for a,b in zip(actual,expected)),1)
 
     def test_triangle_frequency_without_repeating_phase_does_not_enable_cache(self):
         cursor = CarrierEdges.create(chirp(90001, 120000, sweep_ms=2), 125000000)
         self.assertEqual(cursor._period, 0)
         self.assertIsNone(cursor._cache)
+
+    def test_nonperiodic_lookup_preserves_phase_within_one_clock(self):
+        for clock in (125000000,150000000):
+            for sweep in (1.713,2,20):
+                command=chirp(90001,120000,sweep_ms=sweep,duty=.37,phase=.3,
+                              complement=True,dead_time_ns=200)
+                cursor=CarrierEdges.create(command,clock)
+                self.assertIsNotNone(cursor._lut)
+                self.assertLessEqual(len(cursor._lut[0]),32784)
+                seconds=sweep*.006
+                expected=[time*clock for time,_,_ in
+                          _analytic_carrier_events(command,seconds,0,0,clock)]
+                buffer=words(1024)
+                actual=[]
+                while not actual or actual[-1]<seconds*clock:
+                    cursor.fill_into(buffer,len(buffer))
+                    actual.extend(tick+cursor.origin for tick in buffer)
+                actual=[tick for tick in actual if tick<seconds*clock]
+                self.assertEqual(len(actual),len(expected))
+                self.assertLessEqual(max(abs(a-b) for a,b in zip(actual,expected)),1)
 
     def test_unsupported_ranges_decline_the_fast_path(self):
         for command in (pulse(10),pulse(100000,duty=.999),

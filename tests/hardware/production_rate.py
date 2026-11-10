@@ -46,6 +46,6 @@ for name, command in (
     result[name] = {'first_1024_us': first, 'warm_131072_us': elapsed,
                     'warm_edges_per_second': 131072000000 / elapsed,
                     'retained_heap_growth_bytes': gc.mem_alloc() - before,
-                    'cache_bytes': sum(len(part) * 4 for part in cursor._cache)
-                                   if cursor._cache else 0}
+                    'cache_bytes': len(cursor._cache[0]) if cursor._cache else 0,
+                    'lookup_bytes': len(cursor._lut[0]) if cursor._lut else 0}
 print(json.dumps(result))

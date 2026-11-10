@@ -19,15 +19,29 @@ _engine_users = {}
 
 
 class UnderrunError(RuntimeError):
-    pass
+    """Playback data or gate/effect reception missed a hardware deadline.
+
+    The run enters `error`, stops its DMA and applies `final_mask` when serviced.
+    Buffered guards prevent replay of stale data; final-mask response still has
+    interpreter/service latency.
+    """
 
 
 class ExecutionTimeoutError(RuntimeError):
-    pass
+    """A `wait(timeout_ms=...)` deadline expired before execution completed.
+
+    The run stops with its final mask. The timeout is a software deadline in
+    milliseconds; external gate waiting counts towards it.
+    """
 
 
 class GateTimeoutError(ExecutionTimeoutError):
-    pass
+    """A GPIO gate exceeded its configured `timeout_ms` after its entry was serviced.
+
+    The error message identifies the failed gate. Gate history contains service-
+    observed entry/exit times; these are not hardware edge timestamps. The run
+    stops with its final mask. `timeout_ms=None` disables a gate's deadline.
+    """
 
 
 def pio_base(sm_number):
@@ -100,6 +114,20 @@ def enable_group(masks):
 
 
 class PreparedRun:
+    """Finite PIO/DMA playback returned by `CtrlAer.prepare(mode='finite')`.
+
+    Construct through the controller. `program` is its `CompiledProgram`, and
+    `sm` is the low-level MicroPython state machine. `poll_ms` is a soft-service
+    period from 1 to 1000 ms, default 1; it supervises errors, completion and
+    notifications without timing the output edges. Other options are forwarded
+    to `compile_program` when the input is a generator/factory.
+
+    `state` progresses from `prepared` to `armed`/`running`/`waiting`, then `done`,
+    `aborted` or `error`. `error` retains the exception or `None`; `closed` records
+    resource release. `gate_history`/`effect_history` contain service observations.
+    A run supports `with` for closing on exit. Preparation/rearming initialises
+    outputs LOW; completion and abort use `program.final_mask`.
+    """
     TERMINAL = ("done", "aborted", "error")
 
     def __init__(self, controller, program, poll_ms=1, **compile_options):
@@ -147,6 +175,7 @@ class PreparedRun:
 
     @property
     def active(self):
+        """Whether state is `armed`, `running` or `waiting`; does not poll hardware."""
         return self.state in ("armed", "running", "waiting")
 
     def _stop_dma(self):
@@ -158,9 +187,10 @@ class PreparedRun:
                 setattr(self, name, None)
 
     def _stop_timer(self):
-        if self._timer is not None:
-            self._timer.deinit()
-            self._timer = None
+        timer = self._timer
+        self._timer = None
+        if timer is not None:
+            timer.deinit()
 
     def _configure(self):
         self.sm.active(0)
@@ -207,6 +237,12 @@ class PreparedRun:
         self._timer.init(period=self.poll_ms, mode=Timer.PERIODIC, callback=self._timer_service)
 
     def start(self):
+        """Enable the prepared PIO and start supervision; return this run.
+
+        Does not wait for an initial GPIO trigger. Requires an open run in state
+        `prepared` and the same system clock used for compilation. Invalid state
+        or a changed clock raises `RuntimeError` before enabling playback.
+        """
         self._arm_service()
         enable_mask(self.pio_index, self.bit)
         return self
@@ -245,6 +281,13 @@ class PreparedRun:
                 self.state = "running"
 
     def poll(self):
+        """Service completion, markers and errors once; return the state string.
+
+        Output edges and GPIO waits execute in PIO. This method services print
+        effects and software timeouts, recording any execution exception in
+        `error` and applying the final mask. Terminal/in-progress service calls
+        return immediately. Use `wait()` to propagate a recorded exception.
+        """
         if not self.active or self._servicing:
             return self.state
         self._servicing = True
@@ -305,6 +348,14 @@ class PreparedRun:
             self._group._member_failed(self)
 
     def wait(self, timeout_ms=None):
+        """Service playback until terminal, returning this run or raising its error.
+
+        `timeout_ms` is positive milliseconds, or `None` for no overall deadline.
+        It includes external gate waiting. Expiry records/raises
+        `ExecutionTimeoutError`, stops DMA and applies the final mask. A gate's
+        own timeout is independent. Waiting on a never-started/closed run raises
+        `RuntimeError`. An already completed run returns immediately.
+        """
         if self.closed or self.state in ("preparing", "prepared"):
             raise RuntimeError("start the prepared run before waiting")
         if timeout_ms is not None:
@@ -321,6 +372,11 @@ class PreparedRun:
         return self
 
     def abort(self):
+        """Stop playback/DMA/service and apply the final mask; return this run.
+
+        Does not release PIO ownership, so an inactive open run can be rearmed.
+        A completed run remains completed. A closed run raises `RuntimeError`.
+        """
         if self.closed:
             raise RuntimeError("run is closed")
         if self.state == "done":
@@ -332,6 +388,12 @@ class PreparedRun:
         return self
 
     def rearm(self):
+        """Reset an inactive open run for replay and return it in `prepared` state.
+
+        Reuses the same finite packed waveform without advancing its original
+        generator again. Clears histories/error/timing and initialises output
+        LOW. Active or closed runs raise `RuntimeError`; call `start()` to replay.
+        """
         if self.closed or self.active:
             raise RuntimeError("only an inactive open run can be rearmed")
         self._stop_timer()
@@ -339,6 +401,15 @@ class PreparedRun:
         return self
 
     def status(self):
+        """Service once and return a dictionary snapshot of runtime state.
+
+        Keys are `state`, `elapsed_us`, `error` (message or `None`), `underrun`,
+        `gate` (current gate index or `None`), `gate_history`, and `effect_history`.
+        Elapsed microseconds are service-observed wall time, including gates;
+        histories are lists of observations, not hardware-sampled timestamps.
+        Buffered subclasses add queue/production statistics. Their service can
+        advance the generator and execute lookahead side effects.
+        """
         self.poll()
         return {"state": self.state, "elapsed_us": self.elapsed_us,
                 "error": str(self.error) if self.error else None,
@@ -347,6 +418,11 @@ class PreparedRun:
                 "effect_history": self.effect_history}
 
     def close(self):
+        """Abort if necessary, then release DMA/PIO ownership; return `None`.
+
+        Idempotent. Completed output keeps its final mask. Closing prevents
+        starting/rearming this object; prepare another run to use the controller.
+        """
         if self.closed:
             return
         if self.active or self.state in ("prepared", "preparing"):
@@ -372,7 +448,18 @@ class PreparedRun:
 
 
 class PreparedGroup:
-    """Coordinated starts and background fault propagation between members."""
+    """Coordinated prepared runs, constructed with `Group(runs)`.
+
+    `runs` must be a nonempty iterable of distinct, open prepared state machines
+    using the same system clock. Finite and buffered runs expose the same
+    lifecycle. Every member retains its own output pins/final mask.
+
+    Within one PIO block the start enable/divider reset is atomic. RP2350 also
+    supports an atomic start across its PIO blocks. Cross-block RP2040 members
+    require matching initial hardware gates; assert the common trigger only
+    after `start()` returns. An error in one member aborts active peers. Supports
+    `with` for closing every member on exit; `runs` is a tuple of members.
+    """
     def __init__(self, runs):
         self.runs = tuple(runs)
         if not self.runs or len(set(run.sm_id for run in self.runs)) != len(self.runs):
@@ -395,6 +482,13 @@ class PreparedGroup:
                 common = signature
 
     def start(self):
+        """Start all prepared members together and return this group.
+
+        Every member must be open and in `prepared` state, with no conflicting
+        group membership. This arms services before the atomic enable operation.
+        External triggers can still delay output. Invalid states raise
+        `RuntimeError` and any member start failure stops active peers.
+        """
         if any(run.closed or run.state != "prepared" for run in self.runs):
             raise RuntimeError("every group member must be prepared")
         if any(run._group is not None and run._group is not self for run in self.runs):
@@ -417,6 +511,13 @@ class PreparedGroup:
                 run.abort()
 
     def wait(self, timeout_ms=None):
+        """Wait for all members, returning this group or propagating a member error.
+
+        `timeout_ms` is a positive overall group deadline in milliseconds, or
+        `None`. A member error aborts other active members. Deadline expiry uses
+        `ExecutionTimeoutError`; each stopped member applies its own final mask.
+        Members may finish at different times.
+        """
         if timeout_ms is not None:
             number(timeout_ms, "group timeout", strict=True)
         if any(run.state == "prepared" for run in self.runs):
@@ -436,6 +537,12 @@ class PreparedGroup:
             sleep_ms(1)
 
     def rearm(self):
+        """Rearm every inactive open member and return this group.
+
+        Finite members replay their stored packets. Buffered members need a
+        generator factory, so a fresh iterator can be made. Active/closed members
+        or an unrewindable buffered iterator raise `RuntimeError`.
+        """
         if any(run.closed or run.active for run in self.runs):
             raise RuntimeError("every group member must be inactive and open")
         for run in self.runs:
@@ -443,18 +550,21 @@ class PreparedGroup:
         return self
 
     def abort(self):
+        """Abort every member with its own final mask and return this group."""
         for run in self.runs:
             if not run.closed and (run.active or run.state == "prepared"):
                 run.abort()
         return self
 
     def close(self):
+        """Close every member and release its hardware; return `None`. Idempotent."""
         for run in self.runs:
             run.close()
             if run._group is self:
                 run._group = None
 
     def status(self):
+        """Return a list of member `status()` snapshots, servicing each member."""
         return [run.status() for run in self.runs]
 
     def __enter__(self):

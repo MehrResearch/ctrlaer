@@ -40,6 +40,13 @@ class Trigger:
 
     timeout_ms is supervised by the runtime service; the edge itself is observed
     by PIO. None permits an unbounded wait.
+
+    `pin` is a GPIO number 0–29. Use `edge='rising'` (default) or `'falling'`,
+    or set `level=0`/`1` for a level wait. A rising edge must first observe LOW,
+    then HIGH; an already-HIGH input does not release it. A level wait can release
+    immediately. `timeout_ms` must be positive when supplied. Invalid options
+    raise `ValueError` at construction. No GPIO direction/pull is configured:
+    initialise external inputs yourself before preparing the run.
     """
     def __init__(self, pin, edge="rising", level=None, timeout_ms=None):
         self.pin = integer(pin, "trigger pin", 0, 29)
@@ -55,17 +62,34 @@ class Trigger:
         self.edge, self.level, self.timeout_ms = edge, level, timeout_ms
 
     def levels(self):
+        """Return the PIO-observed level sequence as a tuple: `(0,1)`, `(1,0)`, or one level."""
         if self.level is not None:
             return (self.level,)
         return (0, 1) if self.edge == "rising" else (1, 0)
 
     def to_dict(self):
+        """Return a new dictionary with `pin`, `edge`, `level` and `timeout_ms`."""
         return {"pin": self.pin, "edge": self.edge, "level": self.level,
                 "timeout_ms": self.timeout_ms}
 
 
 class CompiledProgram:
-    """Packed immutable-by-contract program, suitable for DMA and offline replay."""
+    """Packed finite waveform returned by `compile_program` or record loading.
+
+    Treat this object's data as immutable. `words` is an unsigned 32-bit packet
+    array, `clock_hz` its system-clock timebase, and `n_pins`/`names` describe the
+    channels. `final_mask` is applied at normal completion and on runtime abort
+    or error. The low-level constructor is for compiler/decoder use; `_u32` is an
+    internal trust flag for already checked uint32 buffers.
+
+    Timing fields are `duration_ticks`, `requested_ticks`, `control_ticks`, and
+    `quantisation_ns`. Nominal duration includes fixed control overhead, excluding
+    unknown external gate waiting and the terminal protocol after the final edge.
+    `pulse_counts` counts rising edges in the nominal program; a final-mask edge
+    at its end is not an experimental pulse. `gates`, `events`, `annotations`,
+    `parameters`, and `windowed` retain analysis metadata. Summaries/previews use
+    these same packed packets, rather than rerunning the original generator.
+    """
     def __init__(self, words, clock_hz, n_pins, names, duration_ticks, gates,
                  pulse_counts, final_mask, quantisation_ns, parameters, windowed,
                  requested_ticks=0, control_ticks=0, events=None, annotations=None,
@@ -102,6 +126,14 @@ class CompiledProgram:
             elapsed += ticks
 
     def edges(self, channel):
+        """Yield `(system_clock_tick, level)` transitions for one zero-based channel.
+
+        The preceding level is assumed LOW; an initial HIGH therefore produces
+        a tick-0 edge, while an initial LOW does not. Includes a changing final
+        mask at the nominal end. Gate waiting is unknown and omitted from the
+        timebase; fixed control instructions remain included. Invalid channel
+        indices raise `ValueError`.
+        """
         integer(channel, "channel", 0, self.n_pins - 1)
         previous = 0
         for start, mask, ticks in self.segments():
@@ -111,6 +143,13 @@ class CompiledProgram:
                 previous = level
 
     def summary(self):
+        """Return channel, timing, gate/event, pulse and memory metadata as a dictionary.
+
+        Includes nominal/requested duration, fixed control overhead, edge and
+        duration quantisation, minimum interval (six clocks), buffer bytes,
+        factory parameters and whether an analysis window clipped the program.
+        No packet words are copied; use `program_to_dict` when those are needed.
+        """
         return {"clock_hz": self.clock_hz, "n_pins": self.n_pins, "names": self.names,
                 "duration_ticks": self.duration_ticks, "duration_ms": self.duration_ms,
                 "gate_wait_time_additional": bool(self.gates), "gates": self.gates,
@@ -569,6 +608,33 @@ def compile_program(program, n_pins=1, freq=108050, clock_hz=None,
     CtrlAer sleep/print/wait effects are interpreted here. Other Python calls and
     global mutations execute normally. A factory receives parameters as keyword
     arguments; an already-created iterator is simply consumed.
+
+    - `program`: iterable yielding `(command, duration)`, or a factory returning
+      one. `parameters` is copied for provenance and passed as factory kwargs.
+    - `n_pins`: logical channel count, 1–16; `names` optionally supplies one string
+      per channel. Compilation does not assign physical output GPIOs.
+    - `freq`: positive Hz for integer commands and the `use_ms=False` time unit.
+      Rich commands specify their own carrier frequency.
+    - `clock_hz`: system-clock ticks per second; defaults to `machine.freq()` on
+      RP2, or 125 MHz on desktop. Match the target device when compiling offline.
+    - `use_ms`: true means durations in milliseconds; false means whole periods
+      of `freq`, including for rich commands. Managed `sleep` always uses seconds.
+    - `window_ms`: optional non-negative nominal analysis window. Clips output
+      to that window, excluding unknown external waits. A crossing command is
+      consumed and its remainder is not retained; this is a preview/finite bound,
+      not a streaming cursor. A window cannot end inside required gate overhead.
+    - `max_segments`: maximum yielded commands, default 100000.
+    - `max_words`: maximum uint32 words, including the final tail, default 32768.
+      Packet memory and temporary compilation storage must fit the available heap.
+    - `final_mask`: one output bit per channel at completion/abort, default 0.
+    - `trigger`: optional initial `Trigger`, before the first output command.
+
+    Returns a `CompiledProgram` with packets, timing/quantisation, pulse counts,
+    gates/effects and parameter metadata. Invalid commands/limits, too many
+    words/segments, infeasible dead times or sub-six-clock intervals raise
+    `ValueError`. Unbounded generators need a window for this finite analyser;
+    use buffered execution to retain command progress indefinitely instead.
+    Analysis executes arbitrary user Python and is not a side-effect sandbox.
     """
     import gc
     threshold = gc.threshold() if hasattr(gc, "threshold") else None
