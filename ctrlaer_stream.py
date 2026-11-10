@@ -14,6 +14,7 @@ from ctrlaer_native import (CarrierEdges, words, _stream_pack, _pulse_pack,
 
 IRQ_GUARD = 0xc034  # irq(block,rel(4)): separate from each SM's completion IRQ.
 NOP = 0xa042
+MAX_CHUNK_EVENTS = 8
 
 
 class Chunk:
@@ -31,7 +32,8 @@ class StreamCompiler:
     """Consume a generator incrementally, retaining a command across fills.
 
     ``buffer_words`` is the capacity of each runtime waveform buffer.
-    ``horizon_ms`` limits lookahead through sparse constant-level commands.
+    ``horizon_ms`` is the target playback time of a chunk. A constant level
+    can last longer: its complete duration still needs only one packet.
     Very dense control streams instead stop at the packet capacity. Arbitrary
     Python side effects execute during lookahead; managed effects become packets.
     """
@@ -63,6 +65,8 @@ class StreamCompiler:
         self.residual = 0
         self.current = self.cursor = self.reference = None
         self.command_index = 0
+        self._level_duration = None
+        self._level_count = self._level_ticks = 0
         self._cached_key = self._cached_cursor = self._cached_state = None
         self.edge_capacity = 2048
         if _scratch is None:
@@ -158,15 +162,28 @@ class StreamCompiler:
             self._start_parallel(state, length)
         else:
             integer(state, 'state', 0, (1 << (2 * self.n_pins)) - 1)
-            if self.use_ms:
-                numerator, scale = self._rational(length)
-                count = numerator * self._frequency_fp // (scale * 1000 * 65536)
+            if not self.use_ms:
+                integer(length, 'ticks', 0, 0x100000000)
+            if length == self._level_duration:
+                count, self.command_end = self._level_count, self._level_ticks
+            elif self.use_ms:
+                if isinstance(length, float) and length * self.frequency / 1000 < 0x1000000:
+                    # Match the original/finite conversion for short float
+                    # durations. Treating the binary float as an exact rational
+                    # floors 0.01 ms at 100 kHz to zero, and 0.08 ms to 7 cycles.
+                    count = int(length * self.frequency / 1000)
+                else:
+                    numerator, scale = self._rational(length)
+                    count = numerator * self._frequency_fp // (scale * 1000 * 65536)
             else:
-                count = integer(length, 'ticks', 0, 0x100000000)
+                count = length
             if length and count < 1:
                 raise ValueError('nonzero duration is shorter than one carrier tick')
-            whole, remainder = divmod(count * self.clock_hz * 65536, self._frequency_fp)
-            self.command_end = whole + rounded(remainder / self._frequency_fp)
+            if length != self._level_duration:
+                whole, remainder = divmod(count * self.clock_hz * 65536, self._frequency_fp)
+                self.command_end = whole + rounded(remainder / self._frequency_fp)
+                self._level_duration = length
+                self._level_count, self._level_ticks = count, self.command_end
             self.first = state & ((1 << self.n_pins) - 1)
             self.second = state >> self.n_pins
             self.mask = self.first
@@ -270,19 +287,21 @@ class StreamCompiler:
 
     def _control(self, kind, value):
         if kind == 'print':
-            self._event({'kind': 'print', 'text': value})
+            self._event(('print', value))
         else:
             gate = self.gate_index
             self.gate_index += 1
-            entry = value.to_dict()
-            entry.update(gate=gate, nominal_tick=self.elapsed)
+            # Keep private streaming metadata compact. Expanding each wait into
+            # several dictionaries consumed the RP2040 heap during short shots,
+            # despite the bounded waveform pool. Public histories remain dicts.
+            entry = ('gate_enter', gate, value, self.elapsed)
             if not self.gates:
                 self.gates = []
             self.gates.append(entry)
-            self._event({'kind': 'gate_enter', 'gate': gate, 'trigger': entry})
+            self._event(entry)
             for level in value.levels():
                 self._packet(WAIT_GPIO | level << 7 | value.pin, 0, CONTROL_TICKS)
-            self._event({'kind': 'gate_exit', 'gate': gate})
+            self._event(('gate_exit', gate))
 
     def _carrier(self, deadline, limit):
         if self.cursor is not None and self.cursor._period and not self.cursor._packed_cache:
@@ -371,7 +390,8 @@ class StreamCompiler:
         while True:
             if self.used:
                 can_guard = output[self.used-1] >= MIN_TICKS
-                if (self.elapsed >= deadline or self.used >= self.capacity - 16) and can_guard:
+                if (self.elapsed >= deadline or self.used >= self.capacity - 16 or
+                        len(self.events) >= MAX_CHUNK_EVENTS) and can_guard:
                     output[self.used-1] -= MIN_TICKS
                     output[self.used], output[self.used+1] = IRQ_GUARD, 0
                     count = self.used + 2
@@ -417,7 +437,11 @@ class StreamCompiler:
                         self._parallel_next = next(self.reference, None)
                     if self._parallel_next is not None:
                         remaining = min(remaining, self._parallel_next[0] - self.command_time)
-                length = min(remaining, max(MIN_TICKS * self.capacity, deadline - self.elapsed), 0xffffffff)
+                # A long constant level costs one packet, regardless of duration.
+                # Splitting an 800 ms hold into 20 ms chunks creates forty
+                # unnecessary refill deadlines and little useful lookahead.
+                # Keep the hold intact; only the hardware counter limits it.
+                length = min(remaining, 0xffffffff)
                 self._packet(OUT_PINS | self.n_pins, self.mask, length)
                 self.command_time += length
             if self.command_time >= self.command_end:

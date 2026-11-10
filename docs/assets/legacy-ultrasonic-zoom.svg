@@ -1,27 +1,49 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="475" viewBox="0 0 1200 475">
-<rect width="100%" height="100%" fill="#101827"/>
-<g font-family="sans-serif" font-size="13" fill="#e6edf7">
-<text x="24" y="30" font-size="20">CtrlAer — compiled generator output</text>
-<text x="24" y="54">0.1 ms · 125000000 Hz clock · 80 bytes · edge quantisation ≤ 8 ns</text>
-<text x="24" y="110">GP0</text>
-<text x="24" y="129" fill="#93a5bc">1 pulses</text>
-<path d="M 150.000 130 H 150.000 V 102 H 1170.000 V 130 H 1170.000" fill="none" stroke="#64d8c5" stroke-width="1.5"/>
-<text x="24" y="175">GP1</text>
-<text x="24" y="194" fill="#93a5bc">4 pulses</text>
-<path d="M 150.000 195 H 150.000 V 167 H 277.541 V 195 H 405.000 V 167 H 532.541 V 195 H 660.000 V 167 H 787.541 V 195 H 915.000 V 167 H 1042.541 V 195 H 1170.000" fill="none" stroke="#64d8c5" stroke-width="1.5"/>
-<text x="24" y="240">GP2</text>
-<text x="24" y="259" fill="#93a5bc">4 pulses</text>
-<path d="M 150.000 260 H 277.541 V 232 H 405.000 V 260 H 532.541 V 232 H 660.000 V 260 H 787.541 V 232 H 915.000 V 260 H 1042.541 V 232 H 1170.000 V 260 H 1170.000" fill="none" stroke="#64d8c5" stroke-width="1.5"/>
-<text x="24" y="305">GP3</text>
-<text x="24" y="324" fill="#93a5bc">4 pulses</text>
-<path d="M 150.000 325 H 150.000 V 297 H 277.541 V 325 H 405.000 V 297 H 532.541 V 325 H 660.000 V 297 H 787.541 V 325 H 915.000 V 297 H 1042.541 V 325 H 1170.000" fill="none" stroke="#64d8c5" stroke-width="1.5"/>
-<text x="24" y="370">GP4</text>
-<text x="24" y="389" fill="#93a5bc">4 pulses</text>
-<path d="M 150.000 390 H 277.541 V 362 H 405.000 V 390 H 532.541 V 362 H 660.000 V 390 H 787.541 V 362 H 915.000 V 390 H 1042.541 V 362 H 1170.000 V 390 H 1170.000" fill="none" stroke="#64d8c5" stroke-width="1.5"/>
-<text x="150.000" y="458" text-anchor="middle">0 ms</text>
-<text x="354.000" y="458" text-anchor="middle">0.02 ms</text>
-<text x="558.000" y="458" text-anchor="middle">0.04 ms</text>
-<text x="762.000" y="458" text-anchor="middle">0.06 ms</text>
-<text x="966.000" y="458" text-anchor="middle">0.08 ms</text>
-<text x="1170.000" y="458" text-anchor="middle">0.1 ms</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 550" role="img">
+<title>Expected output</title>
+<rect width="100%" height="100%" rx="10" fill="#fff"/>
+<g font-family="system-ui, sans-serif" fill="#243247">
+<text x="24" y="32" font-size="23.400000000000002" fill="#243247" font-weight="600" text-anchor="start">Expected output</text>
+<path d="M132.0,54 L132.0,498" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<text x="132.0" y="518" font-size="15.600000000000001" fill="#64748b" font-weight="400" text-anchor="middle">0</text>
+<path d="M299.6,54 L299.6,498" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<text x="299.6" y="518" font-size="15.600000000000001" fill="#64748b" font-weight="400" text-anchor="middle">20</text>
+<path d="M467.2,54 L467.2,498" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<text x="467.2" y="518" font-size="15.600000000000001" fill="#64748b" font-weight="400" text-anchor="middle">40</text>
+<path d="M634.8,54 L634.8,498" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<text x="634.8" y="518" font-size="15.600000000000001" fill="#64748b" font-weight="400" text-anchor="middle">60</text>
+<path d="M802.4,54 L802.4,498" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<text x="802.4" y="518" font-size="15.600000000000001" fill="#64748b" font-weight="400" text-anchor="middle">80</text>
+<path d="M970.0,54 L970.0,498" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<text x="970.0" y="518" font-size="15.600000000000001" fill="#64748b" font-weight="400" text-anchor="middle">100</text>
+<text x="551.0" y="541" font-size="16.900000000000002" fill="#243247" font-weight="400" text-anchor="middle">Time (µs)</text>
+<text x="20" y="83" font-size="18.2" fill="#243247" font-weight="600" text-anchor="start">GP0</text>
+<text x="120" y="67" font-size="13.0" fill="#64748b" font-weight="400" text-anchor="end">HIGH</text>
+<text x="120" y="103" font-size="13.0" fill="#64748b" font-weight="400" text-anchor="end">LOW</text>
+<path d="M132,63 L970,63" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<path d="M132,99 L970,99" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<path d="M 132,99 H 132.000 V 63 H 970.000 V 99 H 970" stroke="#355cbb" stroke-width="2" fill="none"/>
+<text x="20" y="171" font-size="18.2" fill="#243247" font-weight="600" text-anchor="start">GP1</text>
+<text x="120" y="155" font-size="13.0" fill="#64748b" font-weight="400" text-anchor="end">HIGH</text>
+<text x="120" y="191" font-size="13.0" fill="#64748b" font-weight="400" text-anchor="end">LOW</text>
+<path d="M132,151 L970,151" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<path d="M132,187 L970,187" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<path d="M 132,187 H 132.000 V 151 H 236.784 V 187 H 341.500 V 151 H 446.284 V 187 H 551.000 V 151 H 655.784 V 187 H 760.500 V 151 H 865.284 V 187 H 970" stroke="#137b67" stroke-width="2" fill="none"/>
+<text x="20" y="259" font-size="18.2" fill="#243247" font-weight="600" text-anchor="start">GP2</text>
+<text x="120" y="243" font-size="13.0" fill="#64748b" font-weight="400" text-anchor="end">HIGH</text>
+<text x="120" y="279" font-size="13.0" fill="#64748b" font-weight="400" text-anchor="end">LOW</text>
+<path d="M132,239 L970,239" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<path d="M132,275 L970,275" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<path d="M 132,275 H 236.784 V 239 H 341.500 V 275 H 446.284 V 239 H 551.000 V 275 H 655.784 V 239 H 760.500 V 275 H 865.284 V 239 H 970.000 V 275 H 970" stroke="#355cbb" stroke-width="2" fill="none"/>
+<text x="20" y="347" font-size="18.2" fill="#243247" font-weight="600" text-anchor="start">GP3</text>
+<text x="120" y="331" font-size="13.0" fill="#64748b" font-weight="400" text-anchor="end">HIGH</text>
+<text x="120" y="367" font-size="13.0" fill="#64748b" font-weight="400" text-anchor="end">LOW</text>
+<path d="M132,327 L970,327" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<path d="M132,363 L970,363" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<path d="M 132,363 H 132.000 V 327 H 236.784 V 363 H 341.500 V 327 H 446.284 V 363 H 551.000 V 327 H 655.784 V 363 H 760.500 V 327 H 865.284 V 363 H 970" stroke="#137b67" stroke-width="2" fill="none"/>
+<text x="20" y="435" font-size="18.2" fill="#243247" font-weight="600" text-anchor="start">GP4</text>
+<text x="120" y="419" font-size="13.0" fill="#64748b" font-weight="400" text-anchor="end">HIGH</text>
+<text x="120" y="455" font-size="13.0" fill="#64748b" font-weight="400" text-anchor="end">LOW</text>
+<path d="M132,415 L970,415" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<path d="M132,451 L970,451" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<path d="M 132,451 H 236.784 V 415 H 341.500 V 451 H 446.284 V 415 H 551.000 V 451 H 655.784 V 415 H 760.500 V 451 H 865.284 V 415 H 970.000 V 451 H 970" stroke="#355cbb" stroke-width="2" fill="none"/>
 </g></svg>

@@ -36,17 +36,25 @@ def rounded(value):
 
 
 class Trigger:
-    """GPIO edge or level wait. Edge waits require the opposite level first.
+    """Describe an input change or level that starts an experiment.
 
-    timeout_ms is supervised by the runtime service; the edge itself is observed
-    by PIO. None permits an unbounded wait.
+    Pass this object as `trigger=` to `controller.prepare()` or `DigitalCapture()`.
+    Use `wait_for()` for a wait inside an experiment function.
 
-    `pin` is a GPIO number 0–29. Use `edge='rising'` (default) or `'falling'`,
-    or set `level=0`/`1` for a level wait. A rising edge must first observe LOW,
-    then HIGH; an already-HIGH input does not release it. A level wait can release
-    immediately. `timeout_ms` must be positive when supplied. Invalid options
-    raise `ValueError` at construction. No GPIO direction/pull is configured:
-    initialise external inputs yourself before preparing the run.
+    Args:
+        pin (int): GPIO number, from 0 to 29. Configure the input and its pull-up or
+            pull-down with `machine.Pin` before preparing the experiment.
+        edge (str): `"rising"` (the default) waits for LOW then HIGH. `"falling"`
+            waits for HIGH then LOW. A HIGH input alone is not a new rising edge.
+        level (int or None): Set 0 or 1 to wait for that level instead of an edge.
+            The experiment continues immediately if that level is already present.
+        timeout_ms (float or None): Positive time limit in milliseconds, or `None`
+            to wait indefinitely. Python supervises this deadline, so handling a
+            timeout can be delayed by other Python work. Digital capture instead
+            uses the overall timeout passed to its `wait()` method.
+
+    Invalid arguments raise `ValueError`. Creating a Trigger does not configure
+    or change the pin. The PIO hardware watches the input during playback.
     """
     def __init__(self, pin, edge="rising", level=None, timeout_ms=None):
         self.pin = integer(pin, "trigger pin", 0, 29)
@@ -74,21 +82,29 @@ class Trigger:
 
 
 class CompiledProgram:
-    """Packed finite waveform returned by `compile_program` or record loading.
+    """The calculated output returned by `compile_program()`.
 
-    Treat this object's data as immutable. `words` is an unsigned 32-bit packet
-    array, `clock_hz` its system-clock timebase, and `n_pins`/`names` describe the
-    channels. `final_mask` is applied at normal completion and on runtime abort
-    or error. The low-level constructor is for compiler/decoder use; `_u32` is an
-    internal trust flag for already checked uint32 buffers.
+    Use `compile_program()` or `load_record()` to obtain one. Keep its contents
+    unchanged so that the output, summary and saved record agree.
 
-    Timing fields are `duration_ticks`, `requested_ticks`, `control_ticks`, and
-    `quantisation_ns`. Nominal duration includes fixed control overhead, excluding
-    unknown external gate waiting and the terminal protocol after the final edge.
-    `pulse_counts` counts rising edges in the nominal program; a final-mask edge
-    at its end is not an experimental pulse. `gates`, `events`, `annotations`,
-    `parameters`, and `windowed` retain analysis metadata. Summaries/previews use
-    these same packed packets, rather than rerunning the original generator.
+    | Attribute | Meaning |
+    |---|---|
+    | `words` | Stored output instructions as an array of unsigned 32-bit integers |
+    | `clock_hz` | System-clock frequency used to calculate the output |
+    | `n_pins`, `names` | Number of channels and their labels |
+    | `duration_ticks` | Output duration in clock ticks, including fixed control delays |
+    | `requested_ticks` | Requested duration before timing rounding and control delays |
+    | `control_ticks` | Time used by fixed control instructions |
+    | `quantisation_ns` | Largest recorded edge-rounding difference, in nanoseconds |
+    | `final_mask` | Final HIGH/LOW levels, one bit per channel |
+    | `pulse_counts` | Number of rising edges on each channel, excluding a final-level change at the end |
+    | `gates` | Input waits, with their positions and settings |
+    | `events`, `annotations` | Messages and other recorded operations |
+    | `parameters` | Function arguments saved with the program |
+    | `windowed` | Whether calculation was limited to a time window |
+
+    The duration excludes unknown time waiting for external inputs. Methods below
+    inspect the stored output without running the experiment function again.
     """
     def __init__(self, words, clock_hz, n_pins, names, duration_ticks, gates,
                  pulse_counts, final_mask, quantisation_ns, parameters, windowed,
@@ -603,38 +619,49 @@ class _Compiler:
 def compile_program(program, n_pins=1, freq=108050, clock_hz=None,
                     use_ms=True, window_ms=None, max_segments=100000,
                     max_words=32768, final_mask=0, parameters=None, trigger=None, names=None):
-    """Analyse a generator/factory and compile its commands for DMA playback.
+    """Calculate the complete digital output of an experiment function.
 
-    CtrlAer sleep/print/wait effects are interpreted here. Other Python calls and
-    global mutations execute normally. A factory receives parameters as keyword
-    arguments; an already-created iterator is simply consumed.
+    This runs on desktop Python as well as MicroPython. It reads the instructions
+    without starting output hardware. Pass the result to `render_svg()` for a
+    preview, or to `controller.prepare()` to run it.
 
-    - `program`: iterable yielding `(command, duration)`, or a factory returning
-      one. `parameters` is copied for provenance and passed as factory kwargs.
-    - `n_pins`: logical channel count, 1–16; `names` optionally supplies one string
-      per channel. Compilation does not assign physical output GPIOs.
-    - `freq`: positive Hz for integer commands and the `use_ms=False` time unit.
-      Rich commands specify their own carrier frequency.
-    - `clock_hz`: system-clock ticks per second; defaults to `machine.freq()` on
-      RP2, or 125 MHz on desktop. Match the target device when compiling offline.
-    - `use_ms`: true means durations in milliseconds; false means whole periods
-      of `freq`, including for rich commands. Managed `sleep` always uses seconds.
-    - `window_ms`: optional non-negative nominal analysis window. Clips output
-      to that window, excluding unknown external waits. A crossing command is
-      consumed and its remainder is not retained; this is a preview/finite bound,
-      not a streaming cursor. A window cannot end inside required gate overhead.
-    - `max_segments`: maximum yielded commands, default 100000.
-    - `max_words`: maximum uint32 words, including the final tail, default 32768.
-      Packet memory and temporary compilation storage must fit the available heap.
-    - `final_mask`: one output bit per channel at completion/abort, default 0.
-    - `trigger`: optional initial `Trigger`, before the first output command.
+    Args:
+        program (iterable or callable): Instructions yielding `(command, duration)`,
+            or a function returning those instructions.
+        n_pins (int): Number of channels, from 1 to 16. Physical pins are selected
+            later by the controller.
+        freq (float): Frequency in hertz for integer commands such as `ON`.
+            `square_wave()` and `sweep()` specify their own frequencies.
+        clock_hz (int or None): Target system-clock frequency in hertz. Defaults to
+            `machine.freq()` on the Pico, or 125 MHz on desktop Python.
+        use_ms (bool): Durations are milliseconds when `True`. With `False`, they
+            count whole periods of `freq`. CtrlAer's `sleep()` always uses seconds.
+        window_ms (float or None): Stop at this many milliseconds of output, or
+            `None` to read the complete experiment. Use a window to preview a
+            function that loops forever. Time spent waiting for an external input
+            is additional. A clipped instruction's remainder is not retained.
+        max_segments (int): Maximum number of instructions, default 100000.
+            Exceeding the limit raises `ValueError`.
+        max_words (int): Maximum stored 32-bit words, default 32768 (128 KiB).
+            Exceeding the limit raises `ValueError`; temporary calculations also
+            need memory while preparing the program.
+        final_mask (int): Final output levels, one bit per channel, default all LOW.
+            The run also applies these levels when aborted or stopped by an error.
+        parameters (dict or None): Arguments passed to a program function and saved
+            with the result. Pass a function, rather than an existing iterator, to
+            use these arguments.
+        trigger (Trigger or None): Wait for this input before the first instruction.
+        names (sequence or None): One label per channel for previews and records.
 
-    Returns a `CompiledProgram` with packets, timing/quantisation, pulse counts,
-    gates/effects and parameter metadata. Invalid commands/limits, too many
-    words/segments, infeasible dead times or sub-six-clock intervals raise
-    `ValueError`. Unbounded generators need a window for this finite analyser;
-    use buffered execution to retain command progress indefinitely instead.
-    Analysis executes arbitrary user Python and is not a side-effect sandbox.
+    Returns:
+        A `CompiledProgram` containing output data, timing, channel information,
+        settings, messages and input waits.
+
+    Invalid commands, impossible timing and exceeded limits raise `ValueError`.
+    Output changes must be at least six system-clock ticks apart. CtrlAer's
+    `sleep`, `print` and `wait_for` become parts of the calculated sequence.
+    Other Python operations happen while the function is read, including global
+    assignments, sensor reads or file writes.
     """
     import gc
     threshold = gc.threshold() if hasattr(gc, "threshold") else None

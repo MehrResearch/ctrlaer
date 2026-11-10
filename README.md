@@ -2,110 +2,109 @@
 
 [![DOI](https://zenodo.org/badge/690546753.svg)](https://doi.org/10.5281/zenodo.14763862)
 
-CtrlAer turns Python generators into precisely timed digital waveforms on
-RP2040 and RP2350 boards. It is used for laboratory experiments involving
-coordinated drivers, atomisers, valves, illumination and other logic-controlled
-hardware.
+CtrlAer is a MicroPython library for controlling the timing of laboratory equipment
+using RP2040/RP2350 microcontrollers, for example Raspberry Pi Pico or Pico 2.
+Use it to specify when a light, valve, motor or ultrasonic device turns on, how
+long it operates, and how several devices work together.
 
-Programs yield `(command, duration)` pairs. The same vocabulary supports finite
-prepared playback, indefinite buffered operation with hardware triggers, eager
-execution with Python measurements between commands, and desktop analysis.
-`mux()` combines up to 16 consecutive output channels; `Group` coordinates
-independent state machines. Commands include fixed carriers, duty/phase control,
-complementary dead time and continuous-phase triangular frequency sweeps.
+Write a short Python function for each device. CtrlAer combines their instructions
+so that their outputs follow the same clock. For example, a light can illuminate
+a sample for 10 ms while a camera receives its trigger halfway through:
 
-## Install or upgrade
+![Light and camera timing](docs/assets/light-camera.svg)
 
-With [uv](https://docs.astral.sh/uv/getting-started/installation/), from this checkout:
+See the [documentation](https://mehrresearch.github.io/ctrlaer/) for complete
+programs, wiring diagrams and explanations.
+
+## Install
+
+Install MicroPython for your board, then run this from the checkout on your
+computer with [uv](https://docs.astral.sh/uv/getting-started/installation/):
 
 ```sh
 uv run tools/install.py
 ```
 
-The script enumerates USB serial devices and asks you to select one. It compiles
-native `.mpy` modules for the selected chip, uploads and verifies them, and keeps
-the previous library for rollback. Use `--device PORT` or `--device USB_SERIAL`
-for explicit selection. Repeat after updating the checkout to upgrade. Requires
-board-specific MicroPython 1.29.0 or newer; user application files are retained.
-See the [installation guide](docs/installation.md) for firmware, standalone use
-and troubleshooting.
+Select your board when prompted. The script compiles and installs CtrlAer,
+checks the uploaded files and retains the previous library for rollback. Run
+it again after updating the checkout to upgrade. See the
+[installation guide](docs/installation.md) for firmware and troubleshooting.
 
-## First waveform
+## Try an LED
 
-Run this on the board. GP6 produces three 2 ms bursts at 40 kHz, each followed by
-8 ms LOW. Each burst contains 80 carrier periods. GP6 is a GPIO label, not
-physical header position 6.
+On a Raspberry Pi Pico or Pico 2, the built-in LED is connected to GP25.
+Connect USB and run this on the board; no extra components are needed:
 
 ```python
-from ctrlaer import CtrlAer, ON, OFF
+from ctrlaer import CtrlAer, HIGH, OFF
+from machine import Pin
 
-def bursts():
+LED_PIN = 25
+
+def blink():
     for _ in range(3):
-        yield ON, 2
-        yield OFF, 8
+        yield HIGH, 500
+        yield OFF, 500
 
-controller = CtrlAer(0, base_pin=6, n_pins=1, freq=40000)
+controller = CtrlAer(sm_number=0, base_pin=LED_PIN, n_pins=1)
 try:
-    controller.prepare(bursts()).start().wait(timeout_ms=1000)
+    controller.run(blink())
+    controller.block()
 finally:
     controller.close()
+    Pin(LED_PIN, Pin.OUT, value=0)
 ```
 
-![Three 40 kHz bursts, with 8 ms LOW between them](docs/assets/first-bursts.svg)
+The LED flashes three times, with half a second on and half a second off.
+`finally` stops the controller and leaves the LED off even if you interrupt the
+program. The [getting-started guide](docs/getting-started.md) explains each part,
+includes an optional circuit with a 1 kΩ resistor for boards without a suitable
+built-in LED, then shows how to produce short groups of square waves for a driver input.
 
-Preparation consumes this finite generator before enabling output. The PIO/DMA
-engine then plays the waveform, signals completion, and finishes LOW. No jumper
-is needed to execute it. To observe it, connect a digital input to GP6 and common
-GND. See [physical pins and wiring](docs/wiring.md) before connecting a driver.
+## Build an experiment
 
-## Choose execution timing
+- [Coordinate several outputs](docs/examples.md) with `mux()`.
+- [Wait for external triggers](docs/triggers-and-groups.md), once or before each repetition.
+- [Prepare and replay a sequence](docs/prepared-execution.md), or [run a long experiment](docs/execution-modes.md).
+- [Measure digital output](docs/digital-capture.md) with the Pico itself or a second board.
+- [Preview timing and save results](docs/analysis-and-records.md) on the Pico or your computer.
+- [Compare timing and memory requirements](docs/performance.md) for valves, camera triggers, ultrasound and frequency sweeps.
 
-| Need | Entry point |
-|---|---|
-| Validate, preview and replay a complete finite schedule | `controller.prepare(program)` |
-| Run indefinitely with hardware gates and bounded waveform storage | `controller.prepare(factory, mode="buffered")` |
-| Complete each command before resuming ordinary Python | `controller.run(program, mode="eager")` |
-| Keep the original integer-command FIFO API | `controller.run(program)` |
+## Read the docs locally
 
-Buffered operation keeps producing while PIO plays earlier chunks; production
-must meet its deadlines. Eager operation deliberately permits Python gaps
-between commands. Ordinary Python side effects happen whenever the generator
-advances; use CtrlAer's `sleep`, `print` and `wait_for` for managed playback
-operations. The original FIFO `block` argument waits for queue space; call
-`controller.block()` for actual completion.
+```sh
+uv run mkdocs serve
+```
 
-## Documentation and validation
+Open the address printed in the terminal. Use `uv run mkdocs build --strict` to
+check the complete site. To update the reference after changing a public
+docstring, run `uv run tools/build_api.py`; regenerate the diagrams with
+`uv run tools/build_figures.py`.
 
-The [full documentation](https://mehrresearch.github.io/ctrlaer/) and this
-checkout's guides cover:
-
-- [Getting started](docs/getting-started.md) and [worked examples](docs/examples.md), with waveform plots.
-- [Execution modes](docs/execution-modes.md), [hardware triggers and groups](docs/triggers-and-groups.md).
-- [Digital capture](docs/digital-capture.md), [previews, parameter scans and records](docs/analysis-and-records.md).
-- [API reference](docs/api-reference.md), generated from actual signatures and docstrings.
-- [Performance measurements](docs/performance.md) and [reproducible hardware checks](tests/hardware/README.md).
-
-Cold first-output latency and sustained production have been measured on a Tiny
-2040 and Pico Plus 2, including independent bidirectional capture over GPIO6/GND.
-Performance depends on the waveform, chip, available memory and Python work;
-see the measured envelope in the performance guide.
-
-## Academic Citation
+## Citing CtrlAer
 
 If you use CtrlAer in your research, please cite:
 
+Mehr, S. H. M. CtrlAer: Programmable real-time execution of scientific experiments
+using a domain specific language for the Raspberry Pi Pico/Pico 2. *SoftwareX*
+**30**, 102175 (2025). [https://doi.org/10.1016/j.softx.2025.102175](https://doi.org/10.1016/j.softx.2025.102175)
+
 ```bibtex
-@article{mehr2025ctrlaer,
-    title={CtrlAer: Programmable real-time execution of scientific experiments using a domain specific language for the Raspberry Pi Pico/Pico 2},
-    author={Mehr, S. Hessam M.},
-    journal={SoftwareX},
-    volume={30},
-    pages={102175},
-    year={2025},
-    publisher={Elsevier},
-    doi={10.1016/j.softx.2025.102175}
+@article{Mehr2025CtrlAer,
+  author = {Mehr, S. Hessam M.},
+  title = {{CtrlAer}: Programmable real-time execution of scientific experiments using a domain specific language for the {Raspberry Pi Pico/Pico 2}},
+  journal = {SoftwareX},
+  volume = {30},
+  pages = {102175},
+  year = {2025},
+  doi = {10.1016/j.softx.2025.102175},
+  url = {https://doi.org/10.1016/j.softx.2025.102175}
 }
 ```
+
+The [citation page](docs/citing.md) also provides a
+[downloadable BibTeX file](docs/ctrlaer.bib) and
+[research using CtrlAer](docs/citing.md#research-using-ctrlaer).
 
 ## License
 

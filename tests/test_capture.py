@@ -2,7 +2,7 @@ from array import array
 import io
 import unittest
 
-from ctrlaer import Trace, compile_program, pulse, mux, HIGH, OFF, wait_for
+from ctrlaer import Trace, compile_program, square_wave, mux, HIGH, OFF, wait_for
 
 
 def pack(values, n_pins):
@@ -32,6 +32,16 @@ def sampled(program, rate=1000000, milliseconds=None):
 
 
 class TraceTests(unittest.TestCase):
+    def test_capture_rate_decodes_signed_clock_divider_registers(self):
+        from ctrlaer_capture import _sample_rate
+        for clock in (125000000,150000000):
+            for divisor in (1,31250,37500,65535):
+                register=divisor<<16
+                if register & 0x80000000:
+                    register-=1<<32
+                self.assertEqual(_sample_rate(clock,register),clock/(2*divisor))
+            self.assertEqual(_sample_rate(clock,0),clock/131072)
+
     def test_three_channel_packing_and_last_partial_word(self):
         values = [i % 8 for i in range(23)]
         trace = Trace(pack(values, 3), 3, len(values), 1000000)
@@ -40,15 +50,15 @@ class TraceTests(unittest.TestCase):
         self.assertEqual(next(trace.timestamps(0)), (1000, 1))
 
     def test_trace_matches_the_exact_compiled_buffer(self):
-        program = compile_program(mux([[(pulse(10000,dead_time_ns=1000),2)],
-            [(pulse(10000,complement=True,dead_time_ns=1000),2)]]),n_pins=2)
+        program = compile_program(mux([[(square_wave(10000,dead_time_ns=1000),2)],
+            [(square_wave(10000,complement=True,dead_time_ns=1000),2)]]),n_pins=2)
         trace = sampled(program)
         result = trace.compare(program, tolerance_ns=1000)
         self.assertTrue(result['passed'], result)
 
     def test_wrong_frequency_or_missing_output_does_not_pass(self):
-        intended = compile_program([(pulse(10000),2)])
-        wrong = sampled(compile_program([(pulse(11000),2)]))
+        intended = compile_program([(square_wave(10000),2)])
+        wrong = sampled(compile_program([(square_wave(11000),2)]))
         self.assertFalse(wrong.compare(intended)['passed'])
         quiet = Trace(pack([0] * 2000, 1), 1, 2000, 1000000)
         self.assertFalse(quiet.compare(intended)['passed'])
@@ -86,7 +96,7 @@ class TraceTests(unittest.TestCase):
         self.assertIn('#3000\n0c0', vcd.getvalue())
 
     def test_quiet_partial_capture_is_inconclusive_not_a_full_pass(self):
-        intended=compile_program([(pulse(10000,phase=.75),1)])
+        intended=compile_program([(square_wave(10000,phase=.75),1)])
         quiet=Trace(pack([0]*32,1),1,32,1000000)
         result=quiet.compare(intended)
         self.assertFalse(result['passed'])
@@ -95,7 +105,7 @@ class TraceTests(unittest.TestCase):
         self.assertTrue(quiet.compare(intended,require_complete=False)['passed'])
 
     def test_trigger_may_omit_initial_quiet_dead_time(self):
-        intended=compile_program([(pulse(10000,dead_time_ns=200),1)])
+        intended=compile_program([(square_wave(10000,dead_time_ns=200),1)])
         full=sampled(intended,rate=25000000,milliseconds=1.2)
         values=list(full.levels())[6:]
         triggered=Trace(pack(values,1),1,len(values),25000000)
@@ -104,7 +114,7 @@ class TraceTests(unittest.TestCase):
         self.assertTrue(result['coverage']['initial_quiet_prefix_inferred'])
 
     def test_initial_high_edge_within_origin_resolution_is_not_duplicated(self):
-        intended = compile_program([(pulse(100000, duty=.25), 1)])
+        intended = compile_program([(square_wave(100000, duty=.25), 1)])
         full = sampled(intended, rate=25000000, milliseconds=1.2)
         values = list(full.levels())
         # The first falling edge is sampled one sample later, placing the

@@ -3,7 +3,7 @@ from array import array
 import random
 import unittest
 
-from ctrlaer import chirp, pulse, compile_program
+from ctrlaer import sweep, square_wave, compile_program
 from ctrlaer_native import CarrierEdges, words, _scan_outputs
 from ctrlaer_program import _analytic_carrier_events
 
@@ -21,16 +21,16 @@ class NativeEdgesTests(unittest.TestCase):
 
     def test_native_edges_follow_the_analytic_carrier(self):
         rng = random.Random(20261109)
-        commands = [pulse(108050), chirp(90000, 120000, sweep_ms=2),
-                    chirp(120000, 90000, sweep_ms=2),
-                    chirp(90100, 123400, sweep_ms=1.7, phase=.25)]
+        commands = [square_wave(108050), sweep(90000, 120000, sweep_ms=2),
+                    sweep(120000, 90000, sweep_ms=2),
+                    sweep(90100, 123400, sweep_ms=1.7, phase=.25)]
         for _ in range(30):
             kwargs = dict(duty=rng.uniform(.1,.9),phase=rng.uniform(0,1),
                           complement=rng.choice([False,True]),dead_time_ns=rng.choice([0,200]))
             if rng.choice([False,True]):
-                commands.append(pulse(rng.randint(80000,140000),**kwargs))
+                commands.append(square_wave(rng.randint(80000,140000),**kwargs))
             else:
-                commands.append(chirp(rng.randint(80000,140000),rng.randint(80000,140000),sweep_ms=2,**kwargs))
+                commands.append(sweep(rng.randint(80000,140000),rng.randint(80000,140000),sweep_ms=2,**kwargs))
         for clock in (125000000,150000000):
             for command in commands:
                 with self.subTest(clock=clock,options=vars(command)):
@@ -41,14 +41,14 @@ class NativeEdgesTests(unittest.TestCase):
                     self.assertLessEqual(max(abs(a-b) for a,b in zip(observed,expected)),1)
 
     def test_partitioning_does_not_change_phase_or_sweep_progress(self):
-        for command in (pulse(108050,duty=.4,phase=.2),
-                        chirp(90100,123400,sweep_ms=1.7,phase=.25),
-                        chirp(120000,90000,sweep_ms=2,complement=True)):
+        for command in (square_wave(108050,duty=.4,phase=.2),
+                        sweep(90100,123400,sweep_ms=1.7,phase=.25),
+                        sweep(120000,90000,sweep_ms=2,complement=True)):
             self.assertEqual(self.ticks(command,125000000,count=5000),
                              self.ticks(command,125000000,parts=[1,7,511,1024,2,3455]))
 
     def test_native_coordinate_rollover_preserves_absolute_time(self):
-        for command in (pulse(108050),chirp(90100,123400,sweep_ms=1.7,phase=.25)):
+        for command in (square_wave(108050),sweep(90100,123400,sweep_ms=1.7,phase=.25)):
             cursor=CarrierEdges.create(command,125000000)
             cursor.state[13]+=0x20000000
             output=words(4);cursor.fill_into(output,4)
@@ -58,8 +58,8 @@ class NativeEdgesTests(unittest.TestCase):
 
     def test_periodic_chirp_cache_repeats_carrier_phase_and_is_bounded(self):
         for clock in (125000000, 150000000):
-            for command in (chirp(90000, 120000, sweep_ms=2, phase=.37, duty=.3),
-                            chirp(120000, 90000, sweep_ms=2, complement=True,
+            for command in (sweep(90000, 120000, sweep_ms=2, phase=.37, duty=.3),
+                            sweep(120000, 90000, sweep_ms=2, complement=True,
                                   dead_time_ns=200)):
                 cursor = CarrierEdges.create(command, clock)
                 self.assertEqual(cursor._period_edges, 840)
@@ -84,7 +84,7 @@ class NativeEdgesTests(unittest.TestCase):
         for clock in (125000000,150000000):
             for options in ({'phase':.37,'duty':.3},
                             {'complement':True,'dead_time_ns':200}):
-                command=chirp(90000,120000,**options)
+                command=sweep(90000,120000,**options)
                 cursor=CarrierEdges.create(command,clock)
                 self.assertEqual(cursor._period_edges,8400)
                 output=words(8400*5)
@@ -98,7 +98,7 @@ class NativeEdgesTests(unittest.TestCase):
 
     def test_compact_interval_cache_retains_exact_ticks_with_half_the_storage(self):
         for clock in (125000000,150000000):
-            command=chirp(90000,120000)
+            command=sweep(90000,120000)
             compact=CarrierEdges.create(command,clock)
             reference=CarrierEdges.create(command,clock)
             reference._cache_base=0
@@ -112,7 +112,7 @@ class NativeEdgesTests(unittest.TestCase):
     def test_symmetric_chirp_cache_folds_only_aligned_half_cycles(self):
         for clock in (125000000,150000000):
             for options in ({},{'phase':.1},{'duty':.4},{'dead_time_ns':200}):
-                command=chirp(90000,120000,**options)
+                command=sweep(90000,120000,**options)
                 cursor=CarrierEdges.create(command,clock)
                 actual=words(16800);cursor.fill_into(actual,len(actual))
                 expected=[round(time*clock) for time,_,_ in
@@ -122,19 +122,19 @@ class NativeEdgesTests(unittest.TestCase):
                 self.assertLessEqual(max(abs(a-b) for a,b in zip(actual,expected)),1)
 
     def test_triangle_frequency_without_repeating_phase_does_not_enable_cache(self):
-        cursor = CarrierEdges.create(chirp(90001, 120000, sweep_ms=2), 125000000)
+        cursor = CarrierEdges.create(sweep(90001, 120000, sweep_ms=2), 125000000)
         self.assertEqual(cursor._period, 0)
         self.assertIsNone(cursor._cache)
 
     def test_nonperiodic_lookup_preserves_phase_within_one_clock(self):
         for clock in (125000000,150000000):
-            for sweep in (1.713,2,20):
-                command=chirp(90001,120000,sweep_ms=sweep,duty=.37,phase=.3,
+            for sweep_ms in (1.713,2,20):
+                command=sweep(90001,120000,sweep_ms=sweep_ms,duty=.37,phase=.3,
                               complement=True,dead_time_ns=200)
                 cursor=CarrierEdges.create(command,clock)
                 self.assertIsNotNone(cursor._lut)
                 self.assertLessEqual(len(cursor._lut[0]),32784)
-                seconds=sweep*.006
+                seconds=sweep_ms*.006
                 expected=[time*clock for time,_,_ in
                           _analytic_carrier_events(command,seconds,0,0,clock)]
                 buffer=words(1024)
@@ -147,14 +147,14 @@ class NativeEdgesTests(unittest.TestCase):
                 self.assertLessEqual(max(abs(a-b) for a,b in zip(actual,expected)),1)
 
     def test_unsupported_ranges_decline_the_fast_path(self):
-        for command in (pulse(10),pulse(100000,duty=.999),
-                        chirp(90000,120000,sweep_ms=1e-9)):
+        for command in (square_wave(10),square_wave(100000,duty=.999),
+                        sweep(90000,120000,sweep_ms=1e-9)):
             self.assertIsNone(CarrierEdges.create(command,125000000))
 
 
 class NativePacketTests(unittest.TestCase):
     def test_packet_scan_counts_elapsed_time_and_rises(self):
-        program=compile_program([(pulse(108050),20)])
+        program=compile_program([(square_wave(108050),20)])
         stats=array('I',[0,0,0,0]);pulses=array('I',[0])
         end=_scan_outputs(program.words,0,len(program.words)-4,1,pulses,stats)
         self.assertEqual(end,len(program.words)-4)

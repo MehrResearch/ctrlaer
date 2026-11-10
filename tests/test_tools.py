@@ -2,14 +2,14 @@ import copy, contextlib, io, json
 from pathlib import Path
 import tempfile
 import unittest
-from ctrlaer import pulse, mux, compile_program
+from ctrlaer import square_wave, mux, compile_program
 from ctrlaer_tools import program_to_dict, program_from_dict, parameter_scan, render_svg, main
 from ctrlaer_records import save_record, load_record, fingerprint
 from test_capture import sampled
 
 
 def experiment(ms=1,carrier=10000):
-    yield from mux([[(pulse(carrier),ms)],[(pulse(20000),ms)]])
+    yield from mux([[(square_wave(carrier),ms)],[(square_wave(20000),ms)]])
 
 
 class ToolsTests(unittest.TestCase):
@@ -65,7 +65,7 @@ class ToolsTests(unittest.TestCase):
     def test_cli_loads_python_generator_factories(self):
         with tempfile.TemporaryDirectory() as directory,contextlib.redirect_stdout(io.StringIO()):
             directory=Path(directory);source=directory/'experiment.py'
-            source.write_text('from ctrlaer import pulse\ndef experiment(carrier=10000):\n    yield pulse(carrier), 1\n')
+            source.write_text('from ctrlaer import square_wave\ndef experiment(carrier=10000):\n    yield square_wave(carrier), 1\n')
             svg,compiled=directory/'preview.svg',directory/'compiled.json'
             main(['preview',str(source)+':experiment','--svg',str(svg),'--compiled',str(compiled)])
             self.assertTrue(svg.read_text().startswith('<svg'))

@@ -1,7 +1,7 @@
 """Chunk boundaries must disappear from the emitted electrical waveform."""
 import unittest
 
-from ctrlaer import pulse, chirp, HIGH, LOW, ON, OFF, mux, sleep, print as emit_print, wait_for
+from ctrlaer import square_wave, sweep, HIGH, LOW, ON, OFF, mux, sleep, print as emit_print, wait_for
 from ctrlaer_native import words
 from ctrlaer_program import compile_program, MIN_TICKS, OUT_PINS, IRQ_DONE
 from ctrlaer_stream import StreamCompiler, IRQ_GUARD, NOP
@@ -54,26 +54,47 @@ class StreamCompilerTests(unittest.TestCase):
 
     def test_long_carrier_and_triangle_chirp_survive_many_reused_blocks(self):
         for clock in (125000000, 150000000):
-            for command in (ON, pulse(108050, duty=.4, phase=.2),
-                            chirp(90000,120000,sweep_ms=2),
-                            chirp(90100,123400,sweep_ms=1.7,phase=.25)):
+            for command in (ON, square_wave(108050, duty=.4, phase=.2),
+                            sweep(90000,120000,sweep_ms=2),
+                            sweep(90100,123400,sweep_ms=1.7,phase=.25)):
                 with self.subTest(clock=clock,command=command):
                     self.check_waveform(lambda: iter([(command, 100)]), clock_hz=clock)
 
-    def test_sparse_holds_are_subdivided_without_extra_edges_or_time(self):
+    def test_sparse_holds_stay_whole_without_extra_edges_or_time(self):
         _, chunks = self.check_waveform(lambda: iter([(HIGH,100),(LOW,100)]), buffer_words=128)
-        self.assertGreater(len(chunks), 4)
+        self.assertEqual(len(chunks), 3)
+        self.assertEqual([chunk.ticks for _,chunk in chunks[:2]],[12500000]*2)
         self.assertTrue(all(chunk.count<=6 for _,chunk in chunks[:-1]))
 
+    def test_very_long_holds_split_only_at_the_hardware_counter_limit(self):
+        _, chunks=self.check_waveform(lambda:iter([(HIGH,100000),(LOW,100000)]),
+                                     buffer_words=128)
+        self.assertLess(len(chunks),10)
+
+    def test_float_level_durations_match_integer_period_conversion(self):
+        for clock in (125000000,150000000):
+            for milliseconds in (.01,.02,.08,.8,1.25,800.0):
+                with self.subTest(clock=clock,milliseconds=milliseconds):
+                    self.check_waveform(lambda:iter([(HIGH,milliseconds),(OFF,milliseconds)]),
+                                        clock_hz=clock,freq=100000,buffer_words=128)
+
+    def test_repeated_level_duration_cache_preserves_changes_and_validation(self):
+        self.check_waveform(lambda:iter([(HIGH,.01),(OFF,.01),(HIGH,.08),
+                                         (OFF,.08),(HIGH,800),(OFF,800),
+                                         (HIGH,.01)]),freq=100000)
+        compiler=StreamCompiler([(HIGH,1),(OFF,1.0)],use_ms=False)
+        with self.assertRaisesRegex(ValueError,'ticks must be an integer'):
+            compiler.fill(words(4096))
+
     def test_repeated_chirp_cache_restarts_each_shot_and_rejects_changed_settings(self):
-        a=chirp(90000,120000,sweep_ms=2,duty=.4,phase=.25)
-        b=chirp(120000,90000,sweep_ms=2,duty=.6,phase=.1)
+        a=sweep(90000,120000,sweep_ms=2,duty=.4,phase=.25)
+        b=sweep(120000,90000,sweep_ms=2,duty=.6,phase=.1)
         source=[(a,7.3),(OFF,1.1),(a,7.3),(OFF,1.1),(b,9),(OFF,1),(a,7.3)]
         self.check_waveform(lambda:iter(source),buffer_words=128)
 
     def test_repeated_settings_reuse_cursor_without_rebuilding_native_setup(self):
-        for command in (pulse(108050),chirp(90000,120000,sweep_ms=2),
-                        chirp(90001,120000,sweep_ms=2)):
+        for command in (square_wave(108050),sweep(90000,120000,sweep_ms=2),
+                        sweep(90001,120000,sweep_ms=2)):
             compiler=StreamCompiler([(command,20),(OFF,20),(command,20)],buffer_words=128)
             output=words(128)
             compiler.fill(output)
@@ -82,8 +103,8 @@ class StreamCompilerTests(unittest.TestCase):
             self.assertIs(compiler.cursor,cursor)
 
     def test_nonperiodic_chirp_lookup_reuse_and_native_rollover(self):
-        a=chirp(90001,120000,sweep_ms=2,duty=.37,phase=.2)
-        b=chirp(120000,90001,sweep_ms=1.713,duty=.6,phase=.1)
+        a=sweep(90001,120000,sweep_ms=2,duty=.37,phase=.2)
+        b=sweep(120000,90001,sweep_ms=1.713,duty=.6,phase=.1)
         self.check_waveform(lambda:iter([(a,25),(OFF,1),(a,25),(b,25)]),buffer_words=128)
         cursors=[StreamCompiler([(a,60000)]) for _ in range(2)]
         outputs=[words(4096),words(4096)]
@@ -100,7 +121,7 @@ class StreamCompilerTests(unittest.TestCase):
 
     def test_cached_chirp_packet_rollover_preserves_every_interval(self):
         for options in ({},{'phase':.37,'duty':.3}):
-            command=chirp(90000,120000,sweep_ms=2,**options)
+            command=sweep(90000,120000,sweep_ms=2,**options)
             cursors=[StreamCompiler([(command,60000)]) for _ in range(2)]
             outputs=[words(4096),words(4096)]
             for compiler,output in zip(cursors,outputs):compiler.fill(output)
@@ -120,9 +141,9 @@ class StreamCompilerTests(unittest.TestCase):
             yield LOW, 20
         _, chunks = self.check_waveform(program)
         events = [event for _,chunk in chunks for _,event in chunk.events]
-        self.assertEqual([event['kind'] for event in events], ['print','gate_enter','gate_exit'])
-        self.assertEqual(events[0]['text'], 'ready\n')
-        self.assertEqual(events[1]['trigger']['pin'], 6)
+        self.assertEqual([event[0] for event in events], ['print','gate_enter','gate_exit'])
+        self.assertEqual(events[0][1], 'ready\n')
+        self.assertEqual(events[1][2].pin, 6)
 
     def test_infinite_program_has_bounded_lookahead_and_metadata(self):
         advanced = []
@@ -156,11 +177,31 @@ class StreamCompilerTests(unittest.TestCase):
             events.extend(marker for marker,_ in chunk.events)
         self.assertEqual(events,[65535,1])
 
+    def test_short_triggered_levels_have_bounded_event_lookahead(self):
+        def program():
+            while True:
+                wait_for(6)
+                yield HIGH,.01
+                yield OFF,.01
+        compiler=StreamCompiler(program,freq=100000,buffer_words=4096)
+        output=words(4096)
+        for _ in range(20):
+            chunk=compiler.fill(output)
+            self.assertLessEqual(len(chunk.events),8)
+            self.assertFalse(chunk.final)
+        def finite():
+            for _ in range(25):
+                wait_for(6)
+                yield HIGH,.01
+                yield OFF,.01
+        self.check_waveform(finite,freq=100000,buffer_words=4096)
+
+
     def test_integer_mux_and_rich_mux_match_finite_compilation(self):
         for rich in (False, True):
             def program():
-                a = iter([(pulse(10000) if rich else ON, 20),(OFF,20)])
-                b = iter([(OFF,10),(pulse(10000) if rich else ON,20)])
+                a = iter([(square_wave(10000) if rich else ON, 20),(OFF,20)])
+                b = iter([(OFF,10),(square_wave(10000) if rich else ON,20)])
                 return mux([a,b])
             self.check_waveform(program,n_pins=2,buffer_words=128)
 
@@ -173,7 +214,7 @@ class StreamCompilerTests(unittest.TestCase):
             StreamCompiler(program(),buffer_words=64).fill(words(64))
 
     def test_eof_applies_final_mask_once_and_zero_duration_preserves_level(self):
-        _,chunks=self.check_waveform(lambda:iter([(HIGH,20),(pulse(108050),0)]),final_mask=1)
+        _,chunks=self.check_waveform(lambda:iter([(HIGH,20),(square_wave(108050),0)]),final_mask=1)
         self.assertEqual(sum(1 for _,chunk in chunks if chunk.final),1)
 
     def test_eager_fragments_keep_their_level_at_eof_and_during_managed_sleep(self):
@@ -196,9 +237,9 @@ class StreamCompilerTests(unittest.TestCase):
         self.assertEqual(compiler._ticks(.001,1),150000)
 
     def test_reused_chirp_scratch_does_not_carry_phase_into_a_new_fragment(self):
-        compiler,_=self.compile([(chirp(90000,120000,sweep_ms=2),5)])
+        compiler,_=self.compile([(sweep(90000,120000,sweep_ms=2),5)])
         scratch=(compiler._edge_storage,compiler.edge_buffer,compiler.pack_state)
-        source=[(HIGH,1),(chirp(90100,123400,sweep_ms=1.7,phase=.25),5)]
+        source=[(HIGH,1),(sweep(90100,123400,sweep_ms=1.7,phase=.25),5)]
         replacement,chunks=self.compile(source,_scratch=scratch)
         self.assertIs(replacement.edge_buffer,compiler.edge_buffer)
         finite=compile_program(source)
@@ -207,7 +248,7 @@ class StreamCompilerTests(unittest.TestCase):
 
     def test_long_command_crosses_native_and_python_integer_boundaries(self):
         clock=125000000
-        compiler=StreamCompiler([(pulse(2000),60000)],clock_hz=clock,buffer_words=32)
+        compiler=StreamCompiler([(square_wave(2000),60000)],clock_hz=clock,buffer_words=32)
         output=words(32)
         elapsed=mask=rises=0
         for _ in range(5000):

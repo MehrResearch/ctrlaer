@@ -1,5 +1,5 @@
 """Third-PIO execution and atomic cross-PIO start on an idle Pico Plus 2."""
-from ctrlaer import CtrlAer,pulse,Group,DigitalCapture,Trigger
+from ctrlaer import CtrlAer,square_wave,Group,DigitalCapture,Trigger
 from machine import Pin
 import sys,json
 
@@ -7,8 +7,8 @@ assert 'RP2350' in sys.implementation._machine
 a,b=CtrlAer(0,8,1),CtrlAer(8,9,1)
 capture=None
 try:
-    ra=a.prepare([(pulse(100000),1)])
-    rb=b.prepare([(pulse(40000),1)])
+    ra=a.prepare([(square_wave(100000),1)])
+    rb=b.prepare([(square_wave(40000),1)])
     capture=DigitalCapture(4,8,2,sample_hz=25000000,duration_ms=1.2,trigger=Trigger(8))
     capture.start()
     Group([ra,rb]).start().wait(1000)

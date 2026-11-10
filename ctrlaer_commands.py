@@ -28,61 +28,91 @@ class _Parallel:
         self.signals = signals
 
 
-def pulse(freq, duty=0.5, phase=0, complement=False, dead_time_ns=0):
-    """A carrier command used as ``yield pulse(...), duration``.
+def square_wave(freq, duty=0.5, phase=0, complement=False, dead_time_ns=0):
+    """Create a repeating HIGH/LOW signal at a fixed frequency.
 
-    Complementary partners use the same options with complement=False/True.
-    Both turn on dead_time_ns after their ideal edges; both are off in the gap.
+    Use this command in a generator, for example
+    `yield square_wave(freq=40_000), 2` for 2 ms of a 40 kHz square wave.
+    A single HIGH interval is a pulse; this command produces a train of pulses.
 
-    - `freq`: positive carrier frequency in Hz, independent of the controller's
-      integer-command frequency.
-    - `duty`: ideal HIGH fraction, strictly between 0 and 1.
-    - `phase`: underlying carrier's rising-edge offset in integrated cycles,
-      from 0 inclusive to 1 exclusive. Zero places its first ideal rising edge
-      at command start; complementary turn-on follows the duty boundary.
-    - `complement`: false for the main carrier, true for its complementary
-      partner. Use matching options on both partners in `mux()`.
-    - `dead_time_ns`: non-negative delay from each ideal turn-on edge to actual
-      turn-on, in nanoseconds. Turn-off stays at the ideal edge.
+    Args:
+        freq (float): Frequency in hertz, greater than zero.
+        duty (float): Fraction of a cycle spent HIGH before any turn-on delay.
+            Must be between 0 and 1; the default 0.5 gives equal HIGH and LOW times.
+        phase (float): Delay before the first ideal rising edge, measured in cycles.
+            Use 0 to start immediately, or 0.25 for a quarter-cycle delay. Range: 0–1,
+            excluding 1.
+        complement (bool): Produce the opposite half of the waveform. Give both
+            partners the same frequency, duty and phase.
+        dead_time_ns (float): Delay each turn-on by this many nanoseconds, leaving
+            the turn-off time unchanged. Two complementary outputs are both LOW
+            during this delay. The default is zero.
 
-    Returns a command object, not a generator. Use `yield pulse(...), duration`
-    in a DMA mode or analysis. Compilation checks parameters, active pulse widths,
-    dead-time feasibility and the six-clock minimum merged interval; impossible
-    waveforms raise `ValueError`. Phase restarts for each newly yielded command;
-    chunking/mux subdivision of that command preserves its phase.
+    Returns:
+        A signal command to yield with its duration. It does not start an output.
+
+    Notes:
+        This command currently uses prepared, buffered or eager execution.
+        Each new command starts with its own phase. Splitting a command into
+        internal buffers, or combining it with another channel, preserves its phase.
+        Impossible duty/delay settings and output changes closer than six chip-clock
+        ticks are rejected when the program is prepared.
     """
     return _Carrier(freq, duty, phase, complement, dead_time_ns)
 
 
-def chirp(start_freq, stop_freq, sweep_ms=20, duty=0.5, phase=0, complement=False, dead_time_ns=0):
-    """Continuous-phase triangular frequency sweep within an ON command.
+def sweep(start_freq, stop_freq, sweep_ms=20, duty=0.5, phase=0, complement=False, dead_time_ns=0):
+    """Create a square wave whose frequency repeatedly sweeps between two values.
 
-    sweep_ms is one traversal from start_freq to stop_freq. The return traversal
-    takes the same time, repeating independently of the yielded pulse duration.
+    The frequency changes steadily from `start_freq` to `stop_freq`, then returns
+    in the same time. This up-and-down pattern repeats for as long as the command
+    lasts. The waveform continues smoothly through each change of direction.
 
-    `start_freq`/`stop_freq` are positive Hz; either may be larger. `sweep_ms` is
-    positive milliseconds for **one** leg, not the ON duration. A complete
-    out-and-back triangle takes `2 * sweep_ms`. Yielded duration can end partway
-    through a leg or span many triangles. Equal endpoints produce a constant
-    carrier. Edge times follow integrated frequency with continuous phase.
+    Args:
+        start_freq (float): Starting frequency in hertz, greater than zero.
+        stop_freq (float): Frequency at the other end of the sweep, greater than
+            zero. It may be higher or lower than the starting frequency.
+        sweep_ms (float): Time for one journey between the two frequencies, in
+            milliseconds. A complete out-and-back sweep takes twice this time.
+            The default is 20 ms.
+        duty (float): HIGH fraction of each cycle, as in `square_wave`.
+        phase (float): Initial delay in cycles, as in `square_wave`.
+        complement (bool): Select the complementary output, as in `square_wave`.
+        dead_time_ns (float): Turn-on delay in nanoseconds, as in `square_wave`.
 
-    `duty`, `phase`, `complement` and `dead_time_ns` have the same meaning as in
-    `pulse`. Returns a command for `yield chirp(...), duration`; validation occurs
-    during compilation. Electrical drive timing is defined here; the transducer's
-    physical response is a separate measurement.
+    Returns:
+        A signal command to yield with a duration independent of `sweep_ms`.
+
+    Examples:
+        ```python
+        # 20 ms of output: five complete 2 ms up / 2 ms down sweeps.
+        yield sweep(start_freq=90_000, stop_freq=120_000, sweep_ms=2), 20
+        ```
+
+    Notes:
+        A command can end halfway through a sweep. Equal frequencies give a fixed
+        square wave. Execution requirements and timing checks are the same as for
+        `square_wave`. The command sets the electrical signal; choosing a suitable
+        frequency range for a transducer requires measuring that device.
     """
     return _Carrier(start_freq, duty, phase, complement, dead_time_ns, stop_freq, sweep_ms)
 
 
 def sleep(seconds):
-    """Hold the last digital levels for non-negative finite seconds.
+    """Keep the outputs at their last levels for the given number of seconds.
 
-    Inside finite/buffered analysis this becomes a timed PIO hold; it does not
-    extend a completed carrier's oscillation. Inside eager execution it runs in
-    sequence after the previous command. Original FIFO execution drains queued
-    commands before sleeping. Outside a managed generator it calls `time.sleep`.
-    Returns `None`; invalid duration raises `ValueError`. Yield OFF/LOW before
-    this call when the delay must be inactive.
+    Args:
+        seconds (float): A finite, non-negative time in seconds.
+
+    Returns:
+        `None`.
+
+    Notes:
+        In a CtrlAer program this delay belongs to the experiment's timing.
+        A completed square wave does not keep oscillating during the delay: the
+        last HIGH or LOW level is held. Yield `OFF` first when you want a LOW pause.
+        Outside a CtrlAer program, this calls `time.sleep(seconds)`.
+        Invalid durations raise `ValueError`.
     """
     if (isinstance(seconds, bool) or not isinstance(seconds, (int, float))
             or not isfinite(seconds) or seconds < 0):
@@ -93,15 +123,24 @@ def sleep(seconds):
 
 
 def print(*values, sep=" ", end="\n"):
-    """Print values in managed playback order, using string `sep` and `end`.
+    """Print a message when playback reaches this point in the experiment.
 
-    Finite/buffered compilation records the formatted text and a PIO marker;
-    runtime service prints when it observes that marker, with interpreter
-    notification latency. Eager execution prints before advancing to the next
-    command. Original FIFO execution first drains prior output. Outside a
-    managed generator this calls built-in `print`. Returns `None`; non-string
-    separators/endings raise `TypeError`. Formatting itself happens during
-    lookahead, so arbitrary `__str__` side effects are ordinary Python effects.
+    Args:
+        values (objects): Values to print, separated by `sep`.
+        sep (str): Text between values; the default is a space.
+        end (str): Text after the message; the default is a newline.
+
+    Returns:
+        `None`.
+
+    Notes:
+        This follows the familiar built-in `print` syntax. Inside a prepared or
+        buffered program the message is associated with a point in the output
+        sequence. Python displays it when it handles that notification, so the
+        console time is not a precise measurement of a pin change.
+        Values are converted to text while Python reads the generator. Outside a
+        CtrlAer program, this calls the built-in `print` directly. `sep` and `end`
+        must be strings, otherwise `TypeError` is raised.
     """
     if not isinstance(sep, str) or not isinstance(end, str):
         raise TypeError("sep and end must be strings")
@@ -111,19 +150,30 @@ def print(*values, sep=" ", end="\n"):
 
 
 def wait_for(pin, edge="rising", level=None, timeout_ms=None):
-    """Wait on a GPIO edge/level at this point in a managed generator.
+    """Pause the output sequence until an input signal changes or reaches a level.
 
-    Arguments are those of `Trigger`: GPIO0–29, rising/falling edge or `level=0/1`,
-    and a positive software timeout in milliseconds or `None`. The preceding
-    digital levels remain driven. An edge first requires the opposite level;
-    pulses during prior output are not queued. Configure input direction/pulls
-    before preparation. In a `mux`, effects are global barriers for that engine.
+    Args:
+        pin (int): Input GPIO number, from 0 to 29. Configure it as an input before
+            preparing the experiment.
+        edge (str): `"rising"` for LOW followed by HIGH, or `"falling"` for HIGH
+            followed by LOW. The default is `"rising"`.
+        level (int or None): Set to 0 or 1 to wait for that level instead of an edge.
+            A level already present lets the experiment continue immediately.
+        timeout_ms (float or None): Maximum wait in milliseconds. The default
+            `None` waits without a time limit.
 
-    Uses PIO waits in finite, buffered and eager execution. Analysis records the
-    gate and its fixed control overhead, with unknown external waiting time
-    additional. Returns `None`. Outside managed execution, or with the original
-    FIFO engine, raises `RuntimeError`; invalid trigger arguments raise
-    `ValueError`. Timeout supervision has soft-service/interpreter latency.
+    Returns:
+        `None`.
+
+    Notes:
+        The preceding output levels remain in place while waiting. An edge wait
+        must see the opposite level first: a HIGH input by itself is not a new
+        rising edge. Pulses that occur before the wait begins are not saved.
+        In a `mux()` program, the wait pauses all channels of that controller.
+        Use this helper inside a prepared, buffered or eager generator; calling
+        it outside a supported program raises `RuntimeError`. Invalid arguments
+        raise `ValueError`. Timeout handling runs in Python and can be delayed if
+        other Python code is blocking.
     """
     from ctrlaer_program import Trigger
     trigger = Trigger(pin, edge, level, timeout_ms)

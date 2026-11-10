@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 import ctrlaer
-from ctrlaer import (HIGH, LOW, OFF, ON, chirp, pulse, mux, compile_program,
+from ctrlaer import (HIGH, LOW, OFF, ON, sweep, square_wave, mux, compile_program,
                      sleep, print as event_print, wait_for)
 from ctrlaer_program import MAX_TICKS, MIN_TICKS
 
@@ -39,7 +39,7 @@ class CompilationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'max_segments'):
             compile_program(itertools.repeat((HIGH, 10)), max_segments=3)
         with self.assertRaisesRegex(ValueError, 'max_words'):
-            compile_program([(pulse(100000), 10)], max_words=32)
+            compile_program([(square_wave(100000), 10)], max_words=32)
 
     def test_zero_and_negative_legacy_durations(self):
         p = compile_program([(HIGH, 0), (LOW, 2)])
@@ -78,7 +78,7 @@ class CompilationTests(unittest.TestCase):
 
     def test_sub_minimum_intervals_fail_before_execution(self):
         with self.assertRaisesRegex(ValueError, 'edge interval'):
-            compile_program([(pulse(120000, duty=.9999), 1)])
+            compile_program([(square_wave(120000, duty=.9999), 1)])
 
 
 class EffectTests(unittest.TestCase):
@@ -142,28 +142,28 @@ class EffectTests(unittest.TestCase):
 
 class WaveTests(unittest.TestCase):
     def test_duty_and_phase(self):
-        p = compile_program([(pulse(100000, duty=.25, phase=.5), 1)])
+        p = compile_program([(square_wave(100000, duty=.25, phase=.5), 1)])
         self.assertEqual(list(p.edges(0))[:4], [(625, 1), (938, 0), (1875, 1), (2188, 0)])
         self.assertEqual(p.pulse_counts, [100])
 
     def test_mux_independent_carriers(self):
-        p = compile_program(mux([[(pulse(100000), 2)], [(pulse(40000), 2)]]), n_pins=2)
+        p = compile_program(mux([[(square_wave(100000), 2)], [(square_wave(40000), 2)]]), n_pins=2)
         self.assertEqual(p.pulse_counts, [200, 80])
         for pin, period in ((0, 1250), (1, 3125)):
             rises = [t for t, level in p.edges(pin) if level]
             self.assertTrue(all(b-a == period for a,b in zip(rises,rises[1:])))
 
     def test_complementary_dead_time(self):
-        p = compile_program(mux([[(pulse(100000, dead_time_ns=200), 1)],
-                                 [(pulse(100000, complement=True, dead_time_ns=200), 1)]]), n_pins=2)
+        p = compile_program(mux([[(square_wave(100000, dead_time_ns=200), 1)],
+                                 [(square_wave(100000, complement=True, dead_time_ns=200), 1)]]), n_pins=2)
         segments = list(p.segments())
         self.assertFalse(any(mask == 3 for _,mask,_ in segments))
         self.assertEqual(segments[:4], [(0,0,25),(25,1,600),(625,0,25),(650,2,600)])
         self.assertEqual(p.pulse_counts, [100,100])
 
     def test_triangular_sweep_rate_is_independent_of_on_duration(self):
-        long = compile_program([(chirp(90000,120000,sweep_ms=2),20)])
-        short = compile_program([(chirp(90000,120000,sweep_ms=2),2)])
+        long = compile_program([(sweep(90000,120000,sweep_ms=2),20)])
+        short = compile_program([(sweep(90000,120000,sweep_ms=2),2)])
         self.assertEqual(long.duration_ticks,2500000)
         self.assertEqual(long.pulse_counts,[2100])
         self.assertEqual([(t,v) for t,v in long.edges(0) if t<short.duration_ticks],
@@ -177,23 +177,23 @@ class WaveTests(unittest.TestCase):
         long.validate()
 
     def test_mux_boundaries_do_not_restart_a_chirp(self):
-        carrier=chirp(90000,120000,sweep_ms=2)
+        carrier=sweep(90000,120000,sweep_ms=2)
         alone=compile_program([(carrier,20)])
         merged=compile_program(mux([[(carrier,20)],itertools.repeat((OFF,1))]),n_pins=2,window_ms=20)
         self.assertEqual(list(alone.edges(0)),list(merged.edges(0)))
         merged.validate()
 
     def test_descending_sweep_and_impossible_dead_time(self):
-        p=compile_program([(chirp(120000,90000,sweep_ms=2),4)])
+        p=compile_program([(sweep(120000,90000,sweep_ms=2),4)])
         rises=[t for t,v in p.edges(0) if v]
         self.assertLess(rises[1]-rises[0],rises[209]-rises[208])
         with self.assertRaisesRegex(ValueError,'no active pulse'):
-            compile_program([(pulse(100000,dead_time_ns=5000),1)])
+            compile_program([(square_wave(100000,dead_time_ns=5000),1)])
 
     def test_fractional_cycle_reversals_preserve_integrated_phase(self):
         import math
         f0,f1,leg=90100,123400,.0017
-        p=compile_program([(chirp(f0,f1,sweep_ms=leg*1000,phase=.25),17)])
+        p=compile_program([(sweep(f0,f1,sweep_ms=leg*1000,phase=.25),17)])
         self.assertLessEqual(p.quantisation_ns,1e9/p.clock_hz)
         rises=[tick for tick,value in p.edges(0) if value]
         for index,tick in enumerate(rises):

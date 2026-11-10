@@ -18,11 +18,13 @@ or install those tools globally. Its Python requirement is 3.11 or newer; this i
 the **desktop script's** requirement, not the MicroPython language version.
 
 If the board does not yet run MicroPython, install its board-specific UF2 first.
-Use the [MicroPython board downloads](https://micropython.org/download/) for
-standard boards, the [Tiny 2040 download](https://micropython.org/download/PIMORONI_TINY2040/)
-for the Tiny, or [Pimoroni's RP2350 releases](https://github.com/pimoroni/pimoroni-pico-rp2350/releases)
-for Pico Plus 2 firmware with its PSRAM support. Match the exact board and flash
-size. The CtrlAer installer updates the library; it does not flash firmware.
+Use the firmware download for the
+[Raspberry Pi Pico](https://micropython.org/download/RPI_PICO/) or
+[Pico 2](https://micropython.org/download/RPI_PICO2/), or find your exact board in
+the [MicroPython downloads](https://micropython.org/download/). Hold BOOTSEL while
+connecting USB, then copy the board's UF2 file to the drive that appears.
+After it restarts, the board provides a MicroPython USB serial connection.
+The CtrlAer installer updates the library; it does not flash firmware.
 
 ## Install from your checkout
 
@@ -40,8 +42,8 @@ With no `--device`, the script enumerates ports and asks you to select a number,
 even if only one device is connected. For example:
 
 ```text
-1. /dev/cu.usbmodem101 — Pico Plus 2 — 9b4dc925cd256e98
-2. /dev/cu.usbmodem3101 — Tiny 2040 — df612c64575a2538
+1. /dev/cu.usbmodem101 — Raspberry Pi Pico — USB_SERIAL_1
+2. /dev/cu.usbmodem102 — Raspberry Pi Pico 2 — USB_SERIAL_2
 Select device [1–2], or q to quit:
 ```
 
@@ -57,8 +59,8 @@ uv run tools/install.py --list
 To select explicitly, use either the serial port or its USB serial number:
 
 ```sh
-uv run tools/install.py --device /dev/cu.usbmodem3101
-uv run tools/install.py --device df612c64575a2538
+uv run tools/install.py --device /dev/cu.usbmodem101
+uv run tools/install.py --device USB_SERIAL_1
 # Windows example:
 uv run tools/install.py --device COM5
 ```
@@ -146,3 +148,19 @@ Continue with [your first waveform](getting-started.md).
 
 For startup measurements and the distinction between import cost and waveform
 production rate, see [performance](performance.md).
+
+## Build and read these docs locally
+
+From the checkout, run:
+
+```sh
+uv run mkdocs serve
+```
+
+Open the address printed in the terminal, usually `http://127.0.0.1:8000/ctrlaer/`.
+The page reloads when you edit a guide. To check the complete site and write it
+to `site/`, use:
+
+```sh
+uv run mkdocs build --strict
+```

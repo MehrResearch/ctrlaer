@@ -1,5 +1,5 @@
 """Prepared runtime checks for an otherwise idle Tiny 2040 (unconnected GP8)."""
-from ctrlaer import CtrlAer, HIGH, LOW, pulse
+from ctrlaer import CtrlAer, HIGH, LOW, square_wave
 from ctrlaer_runtime import UnderrunError, ExecutionTimeoutError
 from machine import Pin
 from time import ticks_us, ticks_diff, sleep_ms
@@ -35,7 +35,7 @@ try:
         assert Pin(8).value() == 0 and run.state == 'error'
     results['wait_timeout'] = True
 
-    run = controller.prepare([(pulse(100000),2)], final_mask=0)
+    run = controller.prepare([(square_wave(100000),2)], final_mask=0)
     run._tx.active(0)  # Inject an actual missing DMA feeder, after FIFO prefill.
     try:
         run.start().wait(500)

@@ -46,24 +46,22 @@ def _duration(value):
 
 
 def _always_on():
-    """Shared unbounded generator instance yielding `(ON, 1000)` repeatedly.
+    """An endless generator of `(ON, 1000)` instructions.
 
-    Exported as `always_on`, with no call parentheses. Durations follow the
-    consuming execution mode's units: normally milliseconds, or carrier periods
-    with `use_ms=False`. Consumption advances this shared instance; define a
-    fresh generator factory when independent state is needed. Finite analysis
-    requires an explicit window.
+    Use the exported `always_on` object without parentheses. It is one shared
+    iterator; define your own generator when separate experiments need independent
+    state. Durations use the units selected by `run()` or `prepare()`.
     """
     while True:
         yield ON, 1000
 
 
 def _inactive():
-    """Shared generator instance yielding `(OFF, 1000)` once, exported as `inactive`.
+    """A generator that yields `(OFF, 1000)` once.
 
-    Durations follow the consuming mode's units. After consumption the instance
-    remains exhausted; `mux()` keeps an exhausted channel LOW until its other
-    channels finish. Define a factory for a fresh independently consumed source.
+    Use the exported `inactive` object without parentheses. In a `mux()` program,
+    a channel stays LOW after its generator ends, so this gives an unused channel.
+    The object is a shared iterator and stays exhausted after it has been read.
     """
     # Yielding once is enough: mux() yields OFF when the generator is exhausted.
     # This guarantees that mux() terminates after the last active program.
@@ -75,22 +73,37 @@ always_on = _always_on()
 
 
 def mux(progs):
-    """Merge channel generators, keeping unfinished channels alive to their end.
+    """Combine one signal generator per output into a synchronised experiment.
 
-    Zero-length segments are skipped. Exhausted channels become LOW while other
-    channels continue. Each two-bit state occupies two *bit planes* in the result.
+    Args:
+        progs (sequence): Between 1 and 16 generators or other iterables. Each
+            supplies `(command, duration)` pairs for one output pin. Their order
+            determines the output order, starting at the controller's `base_pin`.
 
-    `progs` is a sequence of 1–16 iterables, each yielding `(command, duration)`
-    for one channel. Integer channel states are 0–3; rich `pulse`/`chirp` commands
-    are accepted in DMA/analysis modes. Channel order maps to consecutive GPIOs
-    from the controller's `base_pin`. Durations must be finite/non-negative.
+    Returns:
+        A generator to pass to `run()`, `prepare()` or `compile_program()`.
 
-    Returns a generator. The shortest unfinished segment sets each merged
-    section boundary; other rich channels retain elapsed phase/sweep position.
-    Managed sleep/print/wait effects are barriers for the whole shared engine.
-    All merged edge intervals must fit its six-clock minimum. Use independent
-    state machines in a `Group` when carriers have arbitrarily close crossings
-    or need independent waits. Invalid channel counts/commands raise `ValueError`.
+    Examples:
+        ```python
+        def light():
+            yield HIGH, 10
+            yield OFF, 90
+
+        def camera():
+            yield OFF, 5
+            yield HIGH, 1
+            yield OFF, 94
+
+        experiment = mux([light(), camera()])  # GP0 and GP1 with base_pin=0.
+        ```
+
+    Notes:
+        Every channel uses the same time origin. A channel whose generator ends
+        stays LOW while the remaining channels finish. Zero-duration instructions
+        are skipped. A wait or CtrlAer sleep inside one channel pauses the combined
+        program. For independent input waits or separate high-frequency square
+        waves, see `Group` and the multiple-output tutorial.
+        Invalid channel counts or signal commands raise `ValueError`.
     """
     N = len(progs)
     if not 1 <= N <= 16:
@@ -132,20 +145,32 @@ def mux(progs):
 
 
 class CtrlAer:
-    """Own a contiguous group of output GPIOs on one PIO state machine.
+    """Control the timing of one or more neighbouring GPIO pins.
 
-    - `sm_number`: global state-machine index, 0–7 on RP2040 or 0–11 on RP2350.
-      Four consecutive indices belong to each PIO block.
-    - `base_pin`: GPIO number of channel 0. Channel `i` uses `base_pin + i`.
-      Outputs must fit within GPIO0–GPIO29 and the board's exposed pins.
-    - `n_pins`: number of contiguous channels, 1–16.
-    - `freq`: positive carrier frequency in Hz for integer commands and the
-      original FIFO engine. Rich `pulse`/`chirp` commands set their own frequency.
+    Args:
+        sm_number (int): Which PIO state machine to use. Start with 0 for your first
+            controller and use a different free number for another controller.
+            There are 8 state machines (0–7) on RP2040 and 12 (0–11) on RP2350.
+        base_pin (int): GPIO number of the first output. For example, 0 means GP0,
+            which is physical pin 1 on a standard Pico.
+        n_pins (int): Number of neighbouring output pins, from 1 to 16. With
+            `base_pin=0, n_pins=2`, the outputs are GP0 and GP1.
+        freq (float): Square-wave frequency in hertz for `ON`, `PULSE01` and
+            `PULSE10`. The default is 108050 Hz. Constant HIGH/LOW instructions do
+            not oscillate; `square_wave()` and `sweep()` supply their own frequency.
 
-    Construction requires MicroPython on RP2. Hardware is claimed when first
-    used, so a new controller does not start output by itself. Use `prepare`
-    followed by `start`/`wait`, or choose an explicit mode with `run`. Always
-    close the controller in a `finally` block to release its PIO/DMA resources.
+    Examples:
+        ```python
+        controller = CtrlAer(sm_number=0, base_pin=0, n_pins=2, freq=40_000)
+        ```
+
+    Notes:
+        Creating the controller does not start a signal. Call `run()` to execute
+        a generator, or `prepare()` to set up playback before starting it.
+        Outputs must lie within GPIO0–29 and be available on the board. Two
+        controllers cannot share an output pin or PIO state machine. Call `close()` in
+        a `finally` block when the experiment finishes or is interrupted.
+        Device execution requires MicroPython on an RP2040/RP2350 board.
     """
     def __init__(self, sm_number, base_pin, n_pins, freq=FREQ):
         if Pin is None:
@@ -171,9 +196,9 @@ class CtrlAer:
 
     @property
     def sm(self):
-        """Original FIFO engine's low-level MicroPython `StateMachine`.
+        """The MicroPython `StateMachine` used by the original `run()` interface.
 
-        Access allocates and enables that engine if necessary. It is unavailable
+        Access allocates and enables that state machine if necessary. It is unavailable
         while a prepared run is open; that run exposes its own `sm` attribute.
         Most applications should use the controller/run methods instead.
         """
@@ -229,13 +254,21 @@ class CtrlAer:
             raise
 
     def set_freq(self, freq):
-        """Set the original FIFO carrier frequency in Hz; return `None`.
+        """Change the square-wave frequency used by the original `run()` interface.
 
-        An allocated FIFO engine changes divider immediately, including for
-        queued commands. The divider is quantised to the hardware's fractional
-        clock. An open prepared run rejects changes: prepare another waveform
-        with new command parameters instead. Invalid frequencies raise
-        `ValueError`; changing an open prepared controller raises `RuntimeError`.
+        Args:
+            freq (float): New frequency in hertz, greater than zero and within the
+                PIO state machine's supported divider range.
+
+        Returns:
+            `None`.
+
+        Notes:
+            A running original state machine changes frequency immediately, including for
+            instructions already in its queue. The hardware rounds the divider to
+            an available value. This method raises `RuntimeError` while a prepared
+            run is open; prepare another program with the desired signal settings.
+            Invalid frequencies raise `ValueError`.
         """
         if self._prepared is not None and not self._prepared.closed:
             raise RuntimeError("prepared frequencies belong to the compiled program; prepare a new program")
@@ -248,40 +281,53 @@ class CtrlAer:
         self._freq = freq
         
     def ticks(self, time):
-        """Convert non-negative milliseconds to whole carrier periods, rounding down.
+        """Convert milliseconds to a whole number of the controller's square-wave periods.
 
-        Uses the controller's configured `freq`, not the system clock or a rich
-        command's frequency. Returns an integer; invalid durations raise
-        `ValueError`.
+        Args:
+            time (float): Non-negative duration in milliseconds.
+
+        Returns:
+            The period count, rounded down to an integer. At 40 kHz, 2 ms is 80 periods.
+
+        Notes:
+            This uses the controller's `freq`, not the chip clock. Invalid durations
+            raise `ValueError`.
         """
         return int(_duration(time) * self._freq / 1000)
     
     def is_full(self):
-        """Return whether this state machine's TX FIFO is full; do not wait.
+        """Return whether the original PIO state machine's instruction queue is full.
 
-        This low-level FIFO status does not describe completion of an output
-        interval or availability of the larger buffered-runtime queues.
+        This is a low-level queue check. It does not wait or report whether playback
+        has finished. It is unavailable while a prepared run is open.
         """
         return bool(mem32[0x50200004 + self.pio_index * 0x100000] & (self.bit_mask << 16))
     
     def is_empty(self):
-        """Return whether this state machine's TX FIFO is empty; do not wait.
+        """Return whether the original PIO state machine's instruction queue is empty.
 
-        An empty FIFO can coexist with an interval still executing in PIO.
-        Use `block()`/`wait()` for completion.
+        An instruction may still be playing after leaving the queue. Use `block()`
+        to wait until the output has actually finished. This is a low-level queue
+        check and is unavailable while a prepared run is open.
         """
         return bool(mem32[0x50200004 + self.pio_index * 0x100000] & (self.bit_mask << 24))
     
     def block(self, timeout_ms=None):
-        """Wait for queued FIFO output to finish, or delegate to a prepared run.
+        """Wait until the preceding output has finished.
 
-        `timeout_ms` is a positive timeout in milliseconds, or `None` for no
-        deadline. Original FIFO completion means the engine has finished its
-        last duration and blocked on the next state-word PULL; TXEMPTY alone is
-        insufficient. Returns `None` for FIFO playback, or the prepared run.
+        Args:
+            timeout_ms (float or None): Maximum wait in milliseconds, greater than
+                zero. The default `None` has no time limit.
 
-        A FIFO timeout raises `RuntimeError` without aborting that engine.
-        Prepared playback uses `PreparedRun.wait` error/final-mask semantics.
+        Returns:
+            `None` for the original `run()` interface, or the current prepared run.
+
+        Notes:
+            Call this after a finite `run()` when the next Python operation must wait
+            for the signal to finish. It waits for the last instruction's duration,
+            not just for the queue to become empty. With a prepared run it delegates
+            to that run's `wait()` method. An original-interface timeout raises
+            `RuntimeError` and leaves that state machine running; abort or close it explicitly.
         """
         if self._prepared is not None and not self._prepared.closed:
             return self._prepared.wait(timeout_ms)
@@ -307,30 +353,37 @@ class CtrlAer:
             _time_sleep(0.001)
 
     def run(self, prog, block=True, use_ms=True, mode=None, **options):
-        """Execute the existing `(command, duration)` generator vocabulary.
+        """Run a generator of `(command, duration)` instructions.
 
-        - `prog`: iterable of pairs; explicit DMA modes also accept a generator
-          factory and its `parameters` preparation option.
-        - `mode=None`: original FIFO engine, accepting integer bit-plane states.
-          `block=True` waits for FIFO space while consuming the generator; it
-          returns `None` at EOF before the last output necessarily finishes.
-          Call `block()` afterwards to wait for completion. With `block=False`,
-          return the same iterator when a whole pair will not fit, or `None` at
-          EOF. Retain/resubmit that iterator to continue without losing commands.
-        - `mode='buffered'`: bounded-memory DMA lookahead, including rich commands
-          and hardware gates. `block=True` waits for completion and returns the
-          run. `block=False` starts playback and returns its active run.
-        - `mode='eager'`: finish each command before resuming Python, holding the
-          last digital level in interpreter/preparation gaps. Synchronous only;
-          `block=False` is rejected. Returns the completed run at finite EOF.
-        - `use_ms`: durations are milliseconds when true, or periods of the
-          controller's `freq` when false. These are not system-clock ticks.
-        - `**options`: forwarded preparation options in explicit DMA modes,
-          including `final_mask`, `trigger`, `buffer_words` and `parameters`.
+        Args:
+            prog (iterable): The experiment's instructions. The explicit buffered and
+                eager options also accept a function that returns a fresh generator.
+            block (bool): With the original interface, wait for queue space as commands
+                are submitted. This does not wait for the final output to finish;
+                call `controller.block()` afterwards. The default is `True`.
+            use_ms (bool): Interpret durations as milliseconds when `True` (the
+                default), or as whole periods of the controller's `freq` when `False`.
+            mode (str or None): Current execution option. `None` keeps the original
+                integer-command interface; `"buffered"` supports long programs with
+                adjustable square waves and hardware waits; `"eager"` waits for each
+                instruction to finish before continuing the experiment function. See the execution guide
+                for the consequences of each option.
+            options: Preparation options passed to the selected buffered/eager run.
+                Examples are `final_mask`, `trigger`, `buffer_words` and `parameters`.
 
-        Eager/buffered errors apply `final_mask` and propagate. The original
-        engine supports managed sleep/print, but hardware `wait_for` and rich
-        commands require a DMA mode. Close the controller in `finally`.
+        Returns:
+            With the original interface and `block=True`, `None` once every instruction
+            has been submitted. With `block=False`, the unfinished iterator when the
+            queue has no room, or `None` when it is exhausted. Keep and resubmit that
+            iterator to continue. Explicit buffered/eager execution returns a run object;
+            buffered `block=False` returns while output is active. Eager requires
+            `block=True` and returns after a finite experiment finishes.
+
+        Notes:
+            The original interface accepts the integer commands such as `HIGH`, `OFF`
+            and `ON`. `square_wave()`, `sweep()` and `wait_for()` use `prepare()`,
+            buffered execution or eager execution. Invalid options raise `ValueError`. Buffered/eager
+            errors stop playback with `final_mask` and propagate to the caller.
         """
         if mode == "eager":
             if not block:
@@ -392,32 +445,57 @@ class CtrlAer:
         self.run(fn())
 
     def prepare(self, program, mode="finite", **kwargs):
-        """Prepare finite playback, or bounded-memory incremental playback.
+        """Set up an experiment so that it can be started explicitly.
 
-        mode='finite' compiles the whole generator (or an explicit window).
-        mode='buffered' keeps five bounded buffers and can consume an infinite
-        generator. start() enables playback; wait()/poll() service it. Chunk
-        transitions preserve levels and phase. A late producer raises an
-        UnderrunError and applies final_mask. Arbitrary Python side effects run
-        during buffered lookahead; managed effects follow playback order.
+        Args:
+            program (iterable or callable): Instructions, a function returning them,
+                or an already compiled program for finite playback.
+            mode (str): `"finite"` (default) calculates and stores the whole experiment
+                before starting. `"buffered"` calculates later sections during playback,
+                allowing an experiment to repeat indefinitely.
+            use_ms (bool): Durations are in milliseconds by default. `False` uses
+                whole periods of the controller's `freq`.
+            final_mask (int): Output levels at completion, abort or error. Bit 0 selects
+                the first output, bit 1 the second, and so on. The default 0 leaves all LOW.
+            trigger (Trigger or None): An input condition to wait for before the first
+                output. The default starts when `start()` is called.
+            parameters (dict or None): Keyword arguments for a generator function.
+            poll_ms (int): Interval between Python's completion/error checks, in
+                milliseconds. Default: 1. These checks do not set waveform timing.
+            window_ms (float or None): For finite preparation, stop at this duration
+                when examining a longer or endless experiment.
+            max_segments (int): Finite limit on the number of instructions read.
+                Default: 100000.
+            max_words (int): Finite limit on stored 32-bit words. Default: 32768.
+            names (sequence or None): Optional channel labels for a finite program.
+            buffer_words (int): Capacity of each buffered waveform block. A power of
+                two from 32 to 8192; default 4096. Default waveform storage is 96 KiB.
+            horizon_ms (float): Target playback time per buffered block, default
+                20 ms. A constant level is kept whole even if it lasts longer;
+                fast-changing signals can fill a block sooner.
+            history_limit (int): Number of recent buffered gate/message observations
+                to retain. Default: 128. Use 0 to retain none.
+            max_pending_effects (int): Maximum queued CtrlAer sleeps, messages and waits
+                during one generator advance. Default: 64. Yield regularly between them.
+            clock_hz (int): Compilation clock in hertz; normally omit it so the current
+                chip clock is used. It must match the device when played.
+            n_pins (int): Compilation channel count; normally omit it so the controller's
+                output count is used. It must match the controller.
+            freq (float): Compilation frequency for integer commands; normally omit it
+                to use the controller's `freq`.
 
-        `program` can be an iterable or a factory. A finite `CompiledProgram`
-        may also be supplied in finite mode. Factory `parameters` are passed as
-        keyword arguments. Durations default to milliseconds (`use_ms=True`).
+        Returns:
+            A run object in the `prepared` state. No output starts until `start()`.
 
-        Common options are `final_mask` (default 0), `trigger` (an initial
-        `Trigger`), and `poll_ms` (soft-service period, default 1 ms). Finite
-        options include `window_ms`, `max_segments`, `max_words` and `names`;
-        see `compile_program`. Buffered options include `buffer_words=4096`
-        per buffer, `horizon_ms=20`, `history_limit=128` and
-        `max_pending_effects=64`. Output count and clock must match the controller
-        and current system clock. See the execution-mode guide for memory/DMA
-        budgets, lookahead and side effects.
-
-        Returns an inactive run in state `prepared`, with DMA/FIFO prefetched.
-        Replaces a previous inactive run after closing it; an active run raises
-        `RuntimeError`. Invalid commands/options or resource failures propagate
-        before playback starts. Call `start()` explicitly.
+        Notes:
+            With the default finite preparation, use a generator that finishes or supply
+            a `window_ms` limit. A repeating experiment needs buffered preparation.
+            Finite packet data must fit memory; buffered playback reserves more working
+            memory and requires Python to keep supplying later sections in time.
+            Preparing a new program closes an inactive previous run. An active previous
+            run must finish or be aborted first. Invalid commands, memory limits or
+            resource conflicts are reported before output starts. Compile options
+            cannot change an already compiled program's clock, channels or settings.
         """
         from ctrlaer_runtime import PreparedRun
         if mode not in ("finite", "buffered"):
@@ -446,32 +524,33 @@ class CtrlAer:
         return self._prepared
 
     def start(self):
-        """Start the most recently prepared run and return it.
+        """Start the most recently prepared experiment and return its run.
 
-        Raises `RuntimeError` if no run was prepared or it is not startable.
-        An initial hardware trigger arms the run; it does not block this call.
+        Prepare a program first. An input trigger can delay its first output after
+        this call returns. Calling this with no prepared program, a closed run or
+        an invalid run state raises `RuntimeError`.
         """
         if self._prepared is None:
             raise RuntimeError("prepare a program before starting")
         return self._prepared.start()
 
     def wait(self, timeout_ms=None):
-        """Wait for prepared completion, or queued original FIFO output.
+        """Wait for the controller's current output to finish.
 
-        `timeout_ms` is a positive millisecond deadline or `None`. Returns the
-        prepared run, or `None` for FIFO playback. Prepared errors propagate and
-        apply their final mask; see `PreparedRun.wait` and `block`.
+        `timeout_ms` is an optional positive deadline in milliseconds. With a prepared
+        run, this returns that run and propagates its errors. With the original
+        interface, it behaves like `block()` and returns `None`.
         """
         if self._prepared is None:
             return self.block(timeout_ms)
         return self._prepared.wait(timeout_ms)
 
     def abort(self):
-        """Stop the current engine; return its prepared run or `None` for FIFO.
+        """Stop the current output immediately from Python.
 
-        Prepared playback applies its configured final mask and stops service
-        and DMA. Original FIFO playback disables its state machine and retains
-        the last digital level. This does not release hardware; call `close()`.
+        A prepared or buffered run applies its `final_mask` and is returned. The
+        original `run()` state machine stops at its last pin level and returns `None`.
+        The hardware remains reserved until `close()`.
         """
         if self._prepared is not None:
             return self._prepared.abort()
@@ -479,11 +558,12 @@ class CtrlAer:
             self._sm.active(0)
 
     def close(self):
-        """Stop playback and release owned PIO/DMA resources; return `None`.
+        """Stop the controller and release its timing and DMA resources.
 
-        Active/prepared DMA runs are aborted with their final mask. Completed
-        runs retain their final output level. Original FIFO playback is disabled
-        at its last level. Safe to call repeatedly, including from `finally`.
+        Returns `None`. Safe to call more than once. An active prepared or buffered
+        run stops with its `final_mask`; a completed run keeps its final levels.
+        The original `run()` interface keeps the last pin level when stopped. Set
+        those pins LOW explicitly when that is the required shutdown state.
         """
         if self._prepared is not None and not self._prepared.closed:
             self._prepared.close()
@@ -504,13 +584,27 @@ class CtrlAer:
             _builtin_print(value, end="")
 
 
-from ctrlaer_commands import pulse, chirp, sleep, print, wait_for, _Carrier, _Signal, _Parallel, _advance
+from ctrlaer_commands import square_wave, sweep, sleep, print, wait_for, _Carrier, _Signal, _Parallel, _advance
 from ctrlaer_program import Trigger, compile_program
 from ctrlaer_capture import Trace, DigitalCapture
 
 
 class Group:
-    """Coordinate prepared runs; hardware imports remain deferred on CPython."""
+    """Start separately prepared controllers together.
+
+    Args:
+        runs (iterable): Prepared run objects from different controllers. Each
+            controller needs its own output pins and PIO state machine.
+
+    Returns:
+        A group with `start()`, `wait()`, `abort()`, `rearm()` and `close()` methods.
+
+    Notes:
+        Start with `mux()` when the outputs can share one controller. A group is
+        useful when separate square waves cannot share that state machine's timing, or
+        when one controller needs to wait while another continues. It uses more
+        hardware resources. See the multiple-output guide before choosing it.
+    """
     def __new__(cls, runs):
         from ctrlaer_runtime import PreparedGroup
         return PreparedGroup(runs)

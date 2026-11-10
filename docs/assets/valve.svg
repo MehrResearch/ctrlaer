@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 198" role="img">
+<title>Expected output</title>
+<rect width="100%" height="100%" rx="10" fill="#fff"/>
+<g font-family="system-ui, sans-serif" fill="#243247">
+<text x="24" y="32" font-size="23.400000000000002" fill="#243247" font-weight="600" text-anchor="start">Expected output</text>
+<path d="M132.0,54 L132.0,146" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<text x="132.0" y="166" font-size="15.600000000000001" fill="#64748b" font-weight="400" text-anchor="middle">0</text>
+<path d="M299.6,54 L299.6,146" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<text x="299.6" y="166" font-size="15.600000000000001" fill="#64748b" font-weight="400" text-anchor="middle">200</text>
+<path d="M467.2,54 L467.2,146" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<text x="467.2" y="166" font-size="15.600000000000001" fill="#64748b" font-weight="400" text-anchor="middle">400</text>
+<path d="M634.8,54 L634.8,146" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<text x="634.8" y="166" font-size="15.600000000000001" fill="#64748b" font-weight="400" text-anchor="middle">600</text>
+<path d="M802.4,54 L802.4,146" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<text x="802.4" y="166" font-size="15.600000000000001" fill="#64748b" font-weight="400" text-anchor="middle">800</text>
+<path d="M970.0,54 L970.0,146" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<text x="970.0" y="166" font-size="15.600000000000001" fill="#64748b" font-weight="400" text-anchor="middle">1000</text>
+<text x="551.0" y="189" font-size="16.900000000000002" fill="#243247" font-weight="400" text-anchor="middle">Time (ms)</text>
+<text x="20" y="83" font-size="18.2" fill="#243247" font-weight="600" text-anchor="start">GP0</text>
+<text x="120" y="67" font-size="13.0" fill="#64748b" font-weight="400" text-anchor="end">HIGH</text>
+<text x="120" y="103" font-size="13.0" fill="#64748b" font-weight="400" text-anchor="end">LOW</text>
+<path d="M132,63 L970,63" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<path d="M132,99 L970,99" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<path d="M 132,99 H 132.000 V 63 H 551.000 V 99 H 970" stroke="#355cbb" stroke-width="2" fill="none"/>
+</g></svg>

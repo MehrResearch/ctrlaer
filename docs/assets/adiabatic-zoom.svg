@@ -1,16 +1,25 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="215" viewBox="0 0 1200 215">
-<rect width="100%" height="100%" fill="#101827"/>
-<g font-family="sans-serif" font-size="13" fill="#e6edf7">
-<text x="24" y="30" font-size="20">CtrlAer — compiled generator output</text>
-<text x="24" y="54">120.008 ms · 125000000 Hz clock · 33632 bytes · edge quantisation ≤ 8 ns</text>
-<text x="24" y="110">GP0</text>
-<text x="24" y="129" fill="#93a5bc">2100 pulses</text>
-<path d="M 150.000 130 H 233.558 V 102 H 290.189 V 130 H 346.819 V 102 H 403.286 V 130 H 459.835 V 102 H 516.221 V 130 H 572.606 V 102 H 628.910 V 130 H 685.214 V 102 H 741.437 V 130 H 797.659 V 102 H 853.718 V 130 H 909.859 V 102 H 965.837 V 130 H 1021.814 V 102 H 1077.710 V 130 H 1133.606 V 102 H 1170.000" fill="none" stroke="#64d8c5" stroke-width="1.5"/>
-<circle cx="150.000" cy="84" r="3" fill="#ffca70"><title>adiabatic shot 20 2</title></circle>
-<text x="150.000" y="198" text-anchor="middle">0 ms</text>
-<text x="354.000" y="198" text-anchor="middle">0.02 ms</text>
-<text x="558.000" y="198" text-anchor="middle">0.04 ms</text>
-<text x="762.000" y="198" text-anchor="middle">0.06 ms</text>
-<text x="966.000" y="198" text-anchor="middle">0.08 ms</text>
-<text x="1170.000" y="198" text-anchor="middle">0.1 ms</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 198" role="img">
+<title>Expected output</title>
+<rect width="100%" height="100%" rx="10" fill="#fff"/>
+<g font-family="system-ui, sans-serif" fill="#243247">
+<text x="24" y="32" font-size="23.400000000000002" fill="#243247" font-weight="600" text-anchor="start">Expected output</text>
+<path d="M132.0,54 L132.0,146" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<text x="132.0" y="166" font-size="15.600000000000001" fill="#64748b" font-weight="400" text-anchor="middle">0</text>
+<path d="M299.6,54 L299.6,146" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<text x="299.6" y="166" font-size="15.600000000000001" fill="#64748b" font-weight="400" text-anchor="middle">20</text>
+<path d="M467.2,54 L467.2,146" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<text x="467.2" y="166" font-size="15.600000000000001" fill="#64748b" font-weight="400" text-anchor="middle">40</text>
+<path d="M634.8,54 L634.8,146" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<text x="634.8" y="166" font-size="15.600000000000001" fill="#64748b" font-weight="400" text-anchor="middle">60</text>
+<path d="M802.4,54 L802.4,146" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<text x="802.4" y="166" font-size="15.600000000000001" fill="#64748b" font-weight="400" text-anchor="middle">80</text>
+<path d="M970.0,54 L970.0,146" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<text x="970.0" y="166" font-size="15.600000000000001" fill="#64748b" font-weight="400" text-anchor="middle">100</text>
+<text x="551.0" y="189" font-size="16.900000000000002" fill="#243247" font-weight="400" text-anchor="middle">Time (µs)</text>
+<text x="20" y="83" font-size="18.2" fill="#243247" font-weight="600" text-anchor="start">GP0</text>
+<text x="120" y="67" font-size="13.0" fill="#64748b" font-weight="400" text-anchor="end">HIGH</text>
+<text x="120" y="103" font-size="13.0" fill="#64748b" font-weight="400" text-anchor="end">LOW</text>
+<path d="M132,63 L970,63" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<path d="M132,99 L970,99" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<path d="M 132,99 H 132.000 V 63 H 178.526 V 99 H 225.052 V 63 H 271.443 V 99 H 317.902 V 63 H 364.227 V 99 H 410.551 V 63 H 456.809 V 99 H 503.066 V 63 H 549.257 V 99 H 595.448 V 63 H 641.504 V 99 H 687.628 V 63 H 733.617 V 99 H 779.606 V 63 H 825.529 V 99 H 871.451 V 63 H 917.307 V 99 H 963.162 V 63 H 970" stroke="#355cbb" stroke-width="2" fill="none"/>
 </g></svg>

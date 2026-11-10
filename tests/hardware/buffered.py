@@ -5,17 +5,23 @@ tools/board.py after installing this checkout's compiled modules.
 """
 from time import ticks_us, ticks_diff, sleep_ms
 begin = ticks_us()
-from ctrlaer import CtrlAer, pulse, chirp, OFF, HIGH, wait_for
+from ctrlaer import CtrlAer, square_wave, sweep, OFF, HIGH, wait_for
 from machine import Pin
 from ctrlaer_runtime import UnderrunError, GateTimeoutError
 import gc
 import json
+import sys
 from uctypes import addressof
+
+# GP8 is linked to GP1 on the current Pico Plus 2 test fixture. A preceding
+# loopback test may have left GP1 driving LOW across the soft reset.
+if 'Pico Plus 2' in sys.implementation._machine:
+    Pin(1, Pin.IN)
 
 result = {}
 controller = CtrlAer(0, 8, 1)
 try:
-    run = controller.prepare([(chirp(90000,120000,sweep_ms=2),100)], mode='buffered')
+    run = controller.prepare([(sweep(90000,120000,sweep_ms=2),100)], mode='buffered')
     scratch=addressof(run.compiler.edge_buffer)
     for block in run.buffers:
         first=addressof(block.words)
@@ -39,7 +45,7 @@ try:
 
     def infinite():
         while True:
-            yield pulse(108050),20
+            yield square_wave(108050),20
             yield OFF,20
     run = controller.prepare(infinite, mode='buffered')
     run.start()
@@ -62,7 +68,7 @@ try:
     def triggered():
         while True:
             wait_for(9, timeout_ms=1000)
-            yield pulse(108050),1
+            yield square_wave(108050),1
             yield OFF,1
     run = controller.prepare(triggered,mode='buffered')
     run.start()
@@ -105,7 +111,7 @@ try:
         for i in range(20):
             if i >= 2:
                 sleep_ms(100)  # Deliberate producer deadline miss after prefill.
-            yield pulse(108050),20
+            yield square_wave(108050),20
     run = controller.prepare(too_slow(),mode='buffered',final_mask=0)
     try:
         run.start().wait(1000)

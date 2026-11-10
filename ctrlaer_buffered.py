@@ -11,6 +11,7 @@ from ctrlaer_program import integer
 from ctrlaer_stream import StreamCompiler, NOP
 from ctrlaer_runtime import (PreparedRun, _engine, _engine_users, claim, pio_base,
                              UnderrunError, GateTimeoutError, _print)
+from ctrlaer_runtime import _close_dma
 
 DMA_INTR = 0x50000400
 
@@ -140,32 +141,32 @@ class _Header:
 
 
 class BufferedRun(PreparedRun):
-    """Four chained TX DMAs and one spare block with fail-closed chunk guards.
+    """A long or repeating experiment prepared a few sections ahead of output.
 
-    Generator work runs in the MicroPython soft service context during lookahead.
-    All output edges and GPIO waits are PIO instructions. A late successor leaves
-    its predecessor's blocking guard intact, so stale cyclic DMA data cannot be
-    played. Software then applies the configured final mask and raises an error.
+    Obtain one with `controller.prepare(program, mode="buffered")`. Start, wait,
+    abort and close it using the same methods as `PreparedRun`.
 
-    Returned by `CtrlAer.prepare(mode='buffered')`; construct through that method.
-    `buffer_words` is the capacity of each of five buffers, a power of two from
-    32 to 8192 (default 4096). The aligned pool uses six times that capacity in
-    bytes per u32: 96 KiB at the default, plus cursor/event/cache storage. The
-    default pool's unused alignment space also holds the 8 KiB edge scratch;
-    smaller pools allocate scratch separately when a carrier needs it. Four
-    TX and two RX DMA channels are claimed. Available heap can limit capacity.
+    Python calculates new sections while earlier ones play. If it falls behind,
+    the hardware pauses rather than replaying old data; Python then reports
+    `UnderrunError` and applies the final levels. The last output level can remain
+    in place until that error is handled.
 
-    `history_limit` bounds both observation histories (default 128; 0 disables
-    retention). `poll_ms` defaults to 1 ms. Other options go to the incremental
-    compiler: `use_ms`, `freq`, `clock_hz`, `n_pins`, `final_mask`, initial
-    `trigger`, factory `parameters`, `horizon_ms=20`, `max_pending_effects=64`.
-    The horizon is a sparse-hold lookahead target, not a total-duration limit.
+    | Option | Meaning |
+    |---|---|
+    | `buffer_words` | Capacity of each of five waveform buffers: a power of two from 32 to 8192, default 4096 |
+    | `history_limit` | Maximum entries in each event history, default 128; zero disables history storage |
+    | `poll_ms` | Python's progress-check interval in milliseconds, default 1 |
+    | `horizon_ms` | Target playback time per block, default 20 ms; constant levels are kept whole and can last longer |
+    | `max_pending_effects` | Maximum pending messages/pauses/waits during one generator step, default 64 |
 
-    The usual `PreparedRun` lifecycle is shared. `program` is a timing/output
-    header, not a complete `CompiledProgram`; no whole-program `words`, preview
-    or packet record exists for an unconsumed future. Compile a separate finite
-    analysis window when those artifacts are needed. Generator/factory Python
-    side effects execute during lookahead; managed operations follow playback.
+    The waveform allocation uses 24 times `buffer_words` bytes: 96 KiB by default,
+    plus other working data. Each run uses one PIO state machine and six DMA channels.
+    The other preparation options are described under `CtrlAer.prepare()`.
+
+    `program` describes the output configuration and timing settings; it does not
+    contain a complete waveform for a function that has not finished. Compile a
+    separate finite window when you need a preview or saved reference. Other Python
+    operations in the function happen during preparation, ahead of output.
     """
     def __init__(self, controller, program, buffer_words=4096, poll_ms=1,
                  history_limit=128, **options):
@@ -205,6 +206,7 @@ class BufferedRun(PreparedRun):
         self._events = {}
         self._registered = self._servicing = False
         self._group = None
+        self._irq_exception = None
         self.mode = 'buffered'
         self._program = _engine(self.program.n_pins)
         self._key = (self.pio_index, self.program.n_pins)
@@ -214,8 +216,8 @@ class BufferedRun(PreparedRun):
                 for index in range(block.count):
                     block.words[index] = 0
         self.chunks = [None, None, None, None, None]
-        claim(self, self.sm_id, self.base_pin, self.program.n_pins)
         try:
+            claim(self, self.sm_id, self.base_pin, self.program.n_pins)
             self.sm = StateMachine(self.sm_id, self._program, freq=self.program.clock_hz,
                                    out_base=Pin(self.base_pin))
             _engine_users[self._key] = _engine_users.get(self._key, 0) + 1
@@ -238,26 +240,30 @@ class BufferedRun(PreparedRun):
             self._irq_state[6] = 1
         if self.sm is not None:
             self.sm.active(0)
-        for dma in self._txs + self._rxs:
-            dma.active(0)
-        for dma in self._txs + self._rxs:
-            dma.close()
+        _close_dma(self._txs, self._rxs)
         self._txs, self._rxs = [], []
 
     def _dma_irq(self, dma):
         # Every value here is a small integer or existing object. No metadata,
         # generator code, printing or allocation runs in the hard interrupt.
-        started = ticks_us()
-        _publish_dma(self._irq_state, self._irq_map[dma.channel], started)
-        elapsed = ticks_diff(ticks_us(), started)
-        if elapsed > self.max_publish_us:
-            self.max_publish_us = elapsed
+        try:
+            started = ticks_us()
+            _publish_dma(self._irq_state, self._irq_map[dma.channel], started)
+            elapsed = ticks_diff(ticks_us(), started)
+            if elapsed > self.max_publish_us:
+                self.max_publish_us = elapsed
+        except BaseException as error:
+            # All attributes already exist: retaining the exception needs no
+            # allocation in this hard IRQ. Foreground service performs cleanup
+            # and re-raises KeyboardInterrupt from wait().
+            self._irq_exception = error
+            self._irq_state[5] = 3
 
     def _register(self, chunk):
         if not chunk.events:
             return
         for gate in chunk.gates:
-            if self.base_pin <= gate['pin'] < self.base_pin + self.program.n_pins:
+            if self.base_pin <= gate[2].pin < self.base_pin + self.program.n_pins:
                 raise ValueError("a gate cannot wait on this controller's own output GPIO")
         for marker, event in chunk.events:
             if marker in self._events:
@@ -304,6 +310,7 @@ class BufferedRun(PreparedRun):
             self.elapsed_us = self.refill_count = self.max_refill_us = self.max_publish_us = self.max_gc_us = 0
         self._gc_due = self.refill_count + 8
         self._terminal_enqueued = False
+        self._irq_exception = None
         self._tx_slots, self._ready_slot = [0, 1, 2, 3], None
         for slot in range(5):
             self.chunks[slot] = self.compiler.fill(self.buffers[slot].words, self.compiler.capacity)
@@ -314,7 +321,14 @@ class BufferedRun(PreparedRun):
                 self._ready_slot = slot
             if self.chunks[slot].final:
                 break
-        self.program.gates = list(self.chunks[0].gates)
+        # The header only needs the initial gate to determine the start state.
+        # Retaining every initial gate also retains its metadata after playback.
+        self.program.gates = []
+        if self.chunks[0].gates:
+            initial = self.chunks[0].gates[0]
+            entry = initial[2].to_dict()
+            entry.update(gate=initial[1], nominal_tick=initial[3])
+            self.program.gates.append(entry)
         self._gc_command = self.compiler.command_index
         self._gc_due = self.refill_count+self._gc_spacing()
         self._terminal_enqueued = any(chunk is not None and chunk.final for chunk in self.chunks[:4])
@@ -370,9 +384,11 @@ class BufferedRun(PreparedRun):
     def _history(self, target, item):
         if not self.history_limit:
             return
-        target.append(item)
-        if len(target) > self.history_limit:
+        # Make room first. Appending entry 129 to a 128-entry list doubles its
+        # backing array before pop() can enforce the advertised bound.
+        if len(target) >= self.history_limit:
             target.pop(0)
+        target.append(item)
 
     def _arm_service(self):
         # Drop construction temporaries before the first refill deadline. On
@@ -399,18 +415,18 @@ class BufferedRun(PreparedRun):
             buffer[position] = 0
             self._receive_index = (self._receive_index + 1) % 512
             self._expected_marker = marker % 65535 + 1
-            if event['kind'] == 'print':
-                self._history(self.effect_history, {'kind':'print', 'text':event['text'],
+            if event[0] == 'print':
+                self._history(self.effect_history, {'kind':'print', 'text':event[1],
                                                    'observed_elapsed_us':self.elapsed_us})
-                _print(event['text'], end='')
+                _print(event[1], end='')
             else:
-                entering = event['kind'] == 'gate_enter'
-                self._history(self.gate_history, {'gate':event['gate'], 'entering':entering,
+                entering = event[0] == 'gate_enter'
+                self._history(self.gate_history, {'gate':event[1], 'entering':entering,
                                                  'observed_elapsed_us':self.elapsed_us})
                 if entering:
-                    self._gate, self._gate_since = event['gate'], ticks_ms()
-                    self._gate_timeout = event['trigger']['timeout_ms']
-                    self.state = 'armed' if self._gate == 0 and event['trigger']['nominal_tick'] == 0 else 'waiting'
+                    self._gate, self._gate_since = event[1], ticks_ms()
+                    self._gate_timeout = event[2].timeout_ms
+                    self.state = 'armed' if self._gate == 0 and event[3] == 0 else 'waiting'
                 else:
                     self._gate = self._gate_since = self._gate_timeout = None
                     self.state = 'running'
@@ -424,6 +440,8 @@ class BufferedRun(PreparedRun):
     def _refill(self):
         state = self._irq_state
         if state[5]:
+            if self._irq_exception is not None:
+                raise self._irq_exception
             raise UnderrunError('DMA handoff missed an unpublished successor')
         if state[6]:
             return
@@ -483,7 +501,9 @@ class BufferedRun(PreparedRun):
             if self._events:
                 self._read_gate_events()
             flags = mem32[self._irq_address]
-            if flags & self.bit:
+            if self._irq_exception is not None:
+                self._fail(self._irq_exception)
+            elif flags & self.bit:
                 self._read_gate_events()
                 if self._events:
                     return self.state
@@ -493,7 +513,8 @@ class BufferedRun(PreparedRun):
             elif flags & self.guard_bit:
                 self._fail(UnderrunError('PIO reached an unpublished chunk successor'))
             elif self._irq_state[5]:
-                self._fail(UnderrunError('DMA handoff missed an unpublished successor'))
+                self._fail(self._irq_exception if self._irq_exception is not None else
+                           UnderrunError('DMA handoff missed an unpublished successor'))
             elif freq() != self.program.clock_hz:
                 self._fail(RuntimeError('system clock changed during execution'))
             elif mem32[self._debug_address] & (self.bit << 24 | self.bit):

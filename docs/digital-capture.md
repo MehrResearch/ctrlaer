@@ -1,78 +1,116 @@
-# Digital capture
+# Measure a digital signal
 
-`DigitalCapture` records a finite, packed digital trace using another PIO state
-machine and RX DMA. It can observe driven output pads on the same chip, so local
-readback requires no jumper wire. A sibling microcontroller can capture connected
-3.3 V digital signals with a shared ground. Neither setup measures analogue signal
-quality; same-chip readback also shares the output clock.
+You can use a Pico to check when a signal goes HIGH or LOW, count its pulses,
+and compare its timing with your program. `DigitalCapture` samples the input
+at regular intervals and saves the result. It can measure the Pico's own output
+or a signal connected from another device.
+
+This checks digital timing. It does not show voltage overshoot, noise or other
+analogue details that you would inspect with an oscilloscope.
+
+## Choose the connection
+
+=== "Check the Pico's own output"
+
+    The example below generates a square wave on GP0 and measures GP0 using a
+    second PIO state machine in the same Pico. Both can use the pin at once; no
+    connection between two pins is needed. This is a convenient first check,
+    although the generator and sampler share the Pico's clock.
+
+=== "Use a second Pico"
+
+    Connect the sending Pico's output to the receiving Pico's GP0, and connect
+    their grounds. On a standard Pico, GP0 is physical pin 1 and GND is pin 3.
+    On the receiving board, configure `Pin(0, Pin.IN)` and start the capture
+    before starting the sender. Each board uses its own clock, so small clock
+    differences can accumulate during a long measurement.
+
+    ![Connect GP0 and GND between two Picos](assets/pico-probe.svg)
+
+=== "Measure an instrument"
+
+    Connect the instrument's digital output to GP0 and its signal ground to
+    Pico GND. Configure `Pin(0, Pin.IN)` before capturing. Use a 3.3 V logic
+    signal; a higher-voltage output needs a suitable level converter.
+
+## Record a short square wave
+
+The example produces 2 ms of a 40 kHz square wave: 80 cycles. The sampler takes
+two million measurements per second, giving one measurement every 0.5 µs and
+about 50 samples per cycle.
 
 ```python
-from ctrlaer import CtrlAer, pulse, compile_program, Trigger, DigitalCapture
+from ctrlaer import CtrlAer, square_wave, Trigger, DigitalCapture
 
-controller = CtrlAer(0, 0, 1)
 def experiment():
-    yield pulse(100000), 20
+    yield square_wave(freq=40_000), 2
 
-program = compile_program(experiment)
-run = controller.prepare(program)
-capture = DigitalCapture(4, 0, sample_hz=8000000, duration_ms=21,
-                         trigger=Trigger(0))
+controller = CtrlAer(sm_number=0, base_pin=0, n_pins=1)
+capture = DigitalCapture(sm_number=4, base_pin=0, sample_hz=2_000_000,
+                         duration_ms=3, trigger=Trigger(pin=0))
 try:
-    capture.start()  # Arm the probe before producing the trigger edge.
+    run = controller.prepare(experiment())
+    capture.start()  # Wait for GP0 to rise before taking the first sample.
     run.start().wait(timeout_ms=1000)
     trace = capture.wait(timeout_ms=1000)
-    print(trace.compare(program, tolerance_ns=250))
-    with open("trace.vcd", "w") as stream:
+    print(trace.summary())
+    print(trace.compare(run.program, tolerance_ns=1000))
+    with open("signal.vcd", "w") as stream:
         trace.write_vcd(stream)
 finally:
     capture.close()
     controller.close()
 ```
 
-![First 50 µs of the expected 100 kHz output](assets/capture-reference.svg)
+Start the capture first so that it is ready for the signal's first rising edge.
+Its three-millisecond recording covers the two-millisecond square wave and a
+little of the final LOW output. The timeout prevents the program from waiting
+forever if no signal arrives.
 
-The figure is the compiled reference for five of the 2000 carrier periods. The
-capture independently samples that output at 8 MS/s (125 ns per sample). Its
-reported comparison, rather than the reference plot, establishes agreement.
-Both state machines observe GP0 on the same chip, so this example needs no
-external connection. For an independent board probe, use the
-[GP6/GND link](wiring.md#two-boards-send-and-verify-in-either-direction).
+The output uses PIO state machine 0; capture uses state machine 4. Each claims its own
+hardware resources. Capture observes the pin without changing it from an output
+to an input. When measuring an external signal, configure that pin as an input
+yourself, as described in the connection tabs above.
 
-Input pads must be enabled as inputs or as existing outputs. Capture does not
-change their GPIO function or output direction. It claims only its state machine.
-The finite sampler uses two PIO cycles per sample, limiting the rate to half the
-system clock. Metadata reports the actual
-rate after divider quantisation. The default buffer limit is 64 KiB. Three-channel
-and other non-power-of-two widths are packed correctly, including a partial final
-word. A hardware trigger can choose an edge or level; `wait` has a software timeout
-that stops an untriggered/incomplete capture.
-`Trigger.timeout_ms` is not used by capture; `capture.wait(timeout_ms=...)`
-supplies its overall software deadline, including trigger waiting.
-The sampler stops itself after the packed buffer's final sample. A DMA-induced
-stall raises `ctrlaer_capture.CaptureOverrunError` and marks the trace invalid;
-it is never treated as a uniformly sampled successful capture.
+## Understand the comparison
 
-`trace.edges(channel)` yields sample indices and levels; `timestamps` yields
-nanoseconds relative to sample 0. These are hardware-sampled relative timestamps.
-GPIO synchronisers and trigger execution introduce a fixed capture-origin offset.
-`write_csv` exports channel-major transition rows; `write_vcd` exports chronological
-digital transitions for a standard waveform viewer. The raw sampled words remain
-available for later analysis. The trace references the capture buffer. Closing
-the capture preserves that data, but rearming/reusing it overwrites the buffer.
-Save or copy a trace before reuse. A HIGH initial sample is an observed level,
-not a sampled LOW-to-HIGH transition; rising-edge counts exclude it.
+`trace.compare()` checks the sequence of HIGH and LOW changes and their times.
+By default it aligns the measured and expected signals using their first edges,
+then checks all channels against that common starting point. The tolerance here
+is 1 µs, or two sample intervals. It accommodates the uncertainty of locating
+an edge between samples; it does not improve the sampler's resolution.
 
-`trace.compare` checks expected transition levels and times against the exact
-compiled buffer. Its default alignment estimates one common start offset across
-all channels; it preserves relative channel phase. Set `align_first_edge=False`
-when the time origin is externally calibrated. The default tolerance is one sample
-period. A constant trace must also match the expected constant level.
+Because capture starts on the first rising edge, the first sample may already
+be HIGH. That initial HIGH is a level, rather than a recorded transition, so
+the trace can report 79 rising edges for this 80-cycle signal. The comparison
+accounts for that starting point.
 
-For gates, supply measured external waiting times in `gate_wait_ticks`, one per
-gate, in the program's output-clock ticks. Unknown waits cannot be inferred from
-the prepared buffer alone and are rejected. A `channels` dictionary can map
-program channels to a subset of captured inputs. Missing pulses, extra pulses,
-wrong levels and excessive timing deviations are reported as mismatches. A short
-capture that does not cover the intended program is inconclusive rather than a
-whole-program pass. Set `require_complete=False` explicitly to compare only the
-observed window, and inspect the returned coverage information.
+Inspect both the mismatches and the reported coverage. A recording that ends
+before the experiment does cannot establish agreement for the whole experiment.
+With an external trigger or gate, the comparison also needs the actual waiting
+times; the prepared program cannot predict when another instrument will signal.
+The [API reference](api-reference.md) explains `gate_wait_ticks` and partial
+comparisons.
+
+## Inspect or save the measurements
+
+Open `signal.vcd` in a digital waveform viewer. `trace.write_csv(stream)` exports
+the transitions as a table. In Python, `trace.edges(channel=0)` gives the sample
+position and new level of each transition; `trace.timestamps(channel=0)` gives
+its time in nanoseconds from the beginning of the recording.
+
+The samples stay available after `capture.close()`. Reusing the capture with
+`arm()` overwrites its buffer, so export or copy the trace before doing that.
+You can also include it in an [experiment record](analysis-and-records.md#save-what-you-ran).
+
+## Choose a recording length and sample rate
+
+More samples give a longer recording or finer timing resolution, at the cost of
+memory. The default limit is 64 KiB. A one-channel recording packs 32 samples
+into each four-byte word: at 2 million samples/s, 64 KiB holds about 262 ms.
+More channels shorten that time because each sample stores more bits.
+
+The maximum sampling rate is half the Pico's system-clock frequency. The result
+reports the actual rate, which may differ slightly from the request. Capture
+uses one PIO state machine and one DMA channel. A transfer that falls behind raises
+`CaptureOverrunError`; that recording cannot be used as evenly spaced samples.

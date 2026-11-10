@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 210" role="img">
+<title>From an experiment to its output</title>
+<rect width="100%" height="100%" rx="10" fill="#fff"/>
+<g font-family="system-ui, sans-serif" fill="#243247">
+<text x="24" y="32" font-size="23.400000000000002" fill="#243247" font-weight="600" text-anchor="start">From an experiment to its output</text>
+<rect x="24" y="72" width="276" height="92" rx="8" fill="#f1f5f9" stroke="#cad3df"/>
+<text x="162" y="106" font-size="22.1" fill="#243247" font-weight="600" text-anchor="middle">Experiment function</text>
+<text x="162" y="139" font-size="15.600000000000001" fill="#243247" font-weight="400" text-anchor="middle">Loops, durations and waits</text>
+<rect x="362" y="72" width="276" height="92" rx="8" fill="#f1f5f9" stroke="#cad3df"/>
+<text x="500" y="106" font-size="22.1" fill="#243247" font-weight="600" text-anchor="middle">PIO state machine</text>
+<text x="500" y="139" font-size="15.600000000000001" fill="#243247" font-weight="400" text-anchor="middle">Produces the electrical signal</text>
+<rect x="700" y="72" width="276" height="92" rx="8" fill="#f1f5f9" stroke="#cad3df"/>
+<text x="838" y="106" font-size="22.1" fill="#243247" font-weight="600" text-anchor="middle">Driver or instrument</text>
+<text x="838" y="139" font-size="15.600000000000001" fill="#243247" font-weight="400" text-anchor="middle">Controls the physical device</text>
+<text x="331" y="126" font-size="36.4" fill="#355cbb" font-weight="400" text-anchor="middle">→</text>
+<text x="669" y="126" font-size="36.4" fill="#355cbb" font-weight="400" text-anchor="middle">→</text>
+</g></svg>

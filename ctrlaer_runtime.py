@@ -5,6 +5,7 @@ underruns and gate timeouts; it is not part of the output timing path.
 """
 from array import array
 import sys
+import micropython
 from builtins import print as _print
 from machine import Pin, Timer, freq, mem32, disable_irq, enable_irq
 from rp2 import PIO, StateMachine, DMA, asm_pio
@@ -16,6 +17,35 @@ _owners = {}
 _pins = {}
 _engines = {}
 _engine_users = {}
+
+
+@micropython.viper
+def _disable_dma(mask: int):
+    # Mask owned IRQs and clear EN on every linked channel before aborting any
+    # of them. active(False) is an abort, not a pause; RP2350-E5 can otherwise
+    # re-trigger a channel during abort. The native section cannot be interrupted
+    # by another KeyboardInterrupt halfway through these register writes.
+    clear = ptr32(0x50003000)
+    clear[0x404 >> 2] = uint(mask)
+    for channel in range(16):
+        if uint(mask) & uint(1 << channel):
+            clear[channel * 16 + 3] = uint(1)
+
+
+def _close_dma(*groups):
+    mask = 0
+    for group in groups:
+        for dma in group:
+            if dma is not None:
+                channel = dma.channel
+                if channel < 16:
+                    mask |= 1 << channel
+    _disable_dma(mask)
+    for group in groups:
+        for dma in group:
+            if dma is not None:
+                dma.close()
+    mem32[0x50000400] = mask
 
 
 class UnderrunError(RuntimeError):
@@ -114,19 +144,27 @@ def enable_group(masks):
 
 
 class PreparedRun:
-    """Finite PIO/DMA playback returned by `CtrlAer.prepare(mode='finite')`.
+    """An experiment prepared in advance by `controller.prepare()`.
 
-    Construct through the controller. `program` is its `CompiledProgram`, and
-    `sm` is the low-level MicroPython state machine. `poll_ms` is a soft-service
-    period from 1 to 1000 ms, default 1; it supervises errors, completion and
-    notifications without timing the output edges. Other options are forwarded
-    to `compile_program` when the input is a generator/factory.
+    Use the controller to obtain this object. `program` contains the calculated
+    signal, and `sm` gives access to the MicroPython PIO state machine if needed.
 
-    `state` progresses from `prepared` to `armed`/`running`/`waiting`, then `done`,
-    `aborted` or `error`. `error` retains the exception or `None`; `closed` records
-    resource release. `gate_history`/`effect_history` contain service observations.
-    A run supports `with` for closing on exit. Preparation/rearming initialises
-    outputs LOW; completion and abort use `program.final_mask`.
+    | Attribute | Meaning |
+    |---|---|
+    | `state` | `prepared`, then `armed`, `running` or `waiting`, followed by `done`, `aborted` or `error` |
+    | `active` | Whether the experiment is armed, running or waiting |
+    | `error` | The exception that stopped the run, or `None` |
+    | `closed` | Whether its hardware resources have been released |
+    | `gate_history` | Input-wait notifications recorded by Python |
+    | `effect_history` | Message and other operation notifications recorded by Python |
+
+    The optional `poll_ms` service period is 1–1000 ms, default 1. It determines how
+    often Python checks for completion, messages and timeouts; it does not time the
+    output changes. Histories record when Python handled an event. Use digital
+    capture for precise measurements of pin changes.
+
+    Preparing or rearming sets the outputs LOW. Completion, abort and errors set
+    them to `program.final_mask`. A `with` block closes the run when it ends.
     """
     TERMINAL = ("done", "aborted", "error")
 
@@ -162,14 +200,14 @@ class PreparedRun:
             raise ValueError("a gate cannot wait on this controller's own output GPIO")
         self._program = _engine(self.program.n_pins)
         self._key = (self.pio_index, self.program.n_pins)
-        claim(self, self.sm_id, self.base_pin, self.program.n_pins)
         try:
+            claim(self, self.sm_id, self.base_pin, self.program.n_pins)
             self.sm = StateMachine(self.sm_id, self._program, freq=self.program.clock_hz,
                                    out_base=Pin(self.base_pin))
             _engine_users[self._key] = _engine_users.get(self._key, 0) + 1
             self._registered = True
             self._configure()
-        except Exception:
+        except BaseException:
             self.close()
             raise
 
@@ -179,12 +217,9 @@ class PreparedRun:
         return self.state in ("armed", "running", "waiting")
 
     def _stop_dma(self):
+        _close_dma((self._tx, self._rx))
         for name in ("_tx", "_rx"):
-            channel = getattr(self, name)
-            if channel is not None:
-                channel.active(0)
-                channel.close()
-                setattr(self, name, None)
+            setattr(self, name, None)
 
     def _stop_timer(self):
         timer = self._timer
@@ -237,11 +272,12 @@ class PreparedRun:
         self._timer.init(period=self.poll_ms, mode=Timer.PERIODIC, callback=self._timer_service)
 
     def start(self):
-        """Enable the prepared PIO and start supervision; return this run.
+        """Start the experiment and return this run.
 
-        Does not wait for an initial GPIO trigger. Requires an open run in state
-        `prepared` and the same system clock used for compilation. Invalid state
-        or a changed clock raises `RuntimeError` before enabling playback.
+        The call returns immediately. If an initial trigger is configured, output
+        waits for that trigger. Use `wait()` to wait for completion. The run must be
+        open and in `prepared` state; otherwise `RuntimeError` is raised. A changed
+        system-clock frequency also raises `RuntimeError` before output begins.
         """
         self._arm_service()
         enable_mask(self.pio_index, self.bit)
@@ -250,7 +286,10 @@ class PreparedRun:
     def _timer_service(self, timer):
         try:
             self.poll()
-        except Exception as error:
+        except BaseException as error:
+            # Ctrl-C can arrive in a soft timer callback. Recording it lets the
+            # foreground wait() raise it, instead of MicroPython swallowing it
+            # as an unhandled timer exception and leaving the experiment alive.
             self._fail(error)
 
     def _read_gate_events(self):
@@ -281,12 +320,12 @@ class PreparedRun:
                 self.state = "running"
 
     def poll(self):
-        """Service completion, markers and errors once; return the state string.
+        """Check progress once and return the current state string.
 
-        Output edges and GPIO waits execute in PIO. This method services print
-        effects and software timeouts, recording any execution exception in
-        `error` and applying the final mask. Terminal/in-progress service calls
-        return immediately. Use `wait()` to propagate a recorded exception.
+        This handles messages, completion, timeouts and errors. The PIO hardware
+        continues to control output changes and input waits. An execution error is
+        saved in `run.error` and the outputs are set to their final levels; `wait()`
+        raises that error for the caller.
         """
         if not self.active or self._servicing:
             return self.state
@@ -348,34 +387,43 @@ class PreparedRun:
             self._group._member_failed(self)
 
     def wait(self, timeout_ms=None):
-        """Service playback until terminal, returning this run or raising its error.
+        """Wait for the experiment to finish and return this run.
 
-        `timeout_ms` is positive milliseconds, or `None` for no overall deadline.
-        It includes external gate waiting. Expiry records/raises
-        `ExecutionTimeoutError`, stops DMA and applies the final mask. A gate's
-        own timeout is independent. Waiting on a never-started/closed run raises
-        `RuntimeError`. An already completed run returns immediately.
+        Args:
+            timeout_ms (float or None): Positive overall time limit in milliseconds,
+                including input waits. `None` waits without an overall limit.
+
+        An expired deadline stops output at its final levels and raises
+        `ExecutionTimeoutError`. An input wait's own timeout is separate. Other
+        execution errors are raised here too. An already finished run returns
+        immediately; a closed or never-started run raises `RuntimeError`.
         """
         if self.closed or self.state in ("preparing", "prepared"):
             raise RuntimeError("start the prepared run before waiting")
         if timeout_ms is not None:
             number(timeout_ms, "wait timeout", strict=True)
         start = ticks_ms()
-        while self.active:
-            self.poll()
-            if self.active and timeout_ms is not None and ticks_diff(ticks_ms(), start) >= timeout_ms:
-                self._fail(ExecutionTimeoutError("execution wait timed out"))
+        try:
+            while self.active:
+                self.poll()
+                if self.active and timeout_ms is not None and ticks_diff(ticks_ms(), start) >= timeout_ms:
+                    self._fail(ExecutionTimeoutError("execution wait timed out"))
+                if self.active:
+                    sleep_ms(self.poll_ms)
+            if self.error is not None:
+                raise self.error
+        except BaseException:
             if self.active:
-                sleep_ms(self.poll_ms)
-        if self.error is not None:
-            raise self.error
+                self.abort()
+            raise
         return self
 
     def abort(self):
-        """Stop playback/DMA/service and apply the final mask; return this run.
+        """Stop the experiment at its final output levels and return this run.
 
-        Does not release PIO ownership, so an inactive open run can be rearmed.
-        A completed run remains completed. A closed run raises `RuntimeError`.
+        Hardware remains reserved so that you can `rearm()` and replay the run.
+        Use `close()` to release it. Aborting a completed run leaves it completed;
+        aborting a closed run raises `RuntimeError`.
         """
         if self.closed:
             raise RuntimeError("run is closed")
@@ -498,7 +546,7 @@ class PreparedGroup:
                 run._group = self
                 run._arm_service()
             enable_group(self.masks)
-        except Exception:
+        except BaseException:
             self.abort()
             raise
         return self
@@ -523,18 +571,20 @@ class PreparedGroup:
         if any(run.state == "prepared" for run in self.runs):
             raise RuntimeError("start the group before waiting")
         start = ticks_ms()
-        while True:
-            for run in self.runs:
-                run.poll()
-                if run.error is not None:
-                    self.abort()
-                    raise run.error
-            if not any(run.active for run in self.runs):
-                return self
-            if timeout_ms is not None and ticks_diff(ticks_ms(), start) >= timeout_ms:
-                self.abort()
-                raise ExecutionTimeoutError("group wait timed out")
-            sleep_ms(1)
+        try:
+            while True:
+                for run in self.runs:
+                    run.poll()
+                    if run.error is not None:
+                        raise run.error
+                if not any(run.active for run in self.runs):
+                    return self
+                if timeout_ms is not None and ticks_diff(ticks_ms(), start) >= timeout_ms:
+                    raise ExecutionTimeoutError("group wait timed out")
+                sleep_ms(1)
+        except BaseException:
+            self.abort()
+            raise
 
     def rearm(self):
         """Rearm every inactive open member and return this group.

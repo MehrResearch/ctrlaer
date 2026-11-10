@@ -7,10 +7,10 @@ throughput figure excludes packing/queueing, so is not a streaming guarantee.
 from time import ticks_us, ticks_diff
 
 begin = ticks_us()
-from ctrlaer import CtrlAer, chirp, pulse
+from ctrlaer import CtrlAer, sweep, square_wave
 
 controller = CtrlAer(0, 8, 1)
-run = controller.prepare([(chirp(90000, 120000, sweep_ms=2), 20)])
+run = controller.prepare([(sweep(90000, 120000, sweep_ms=2), 20)])
 prepared = ticks_diff(ticks_us(), begin)
 run.start()
 started = ticks_diff(ticks_us(), begin)
@@ -28,9 +28,9 @@ result = {'board': sys.implementation._machine, 'clock_hz': freq(),
           'cold_prepare_us': prepared, 'cold_prepare_start_us': started}
 buffer = words(1024)
 for name, command in (
-        ('pulse', pulse(108050)),
-        ('periodic_chirp', chirp(90000, 120000, sweep_ms=2)),
-        ('nonperiodic_chirp', chirp(90001, 120000, sweep_ms=2))):
+        ('pulse', square_wave(108050)),
+        ('periodic_chirp', sweep(90000, 120000, sweep_ms=2)),
+        ('nonperiodic_chirp', sweep(90001, 120000, sweep_ms=2))):
     gc.collect()
     begin = ticks_us()
     cursor = CarrierEdges.create(command, freq())

@@ -1,108 +1,176 @@
-# Your first waveform
+# Getting started
 
-CtrlAer programs are Python generators that yield `(command, duration)` pairs.
-Keep using loops, functions, variables and `mux()` to build experiments. The
-execution mode determines when Python runs and how much waveform data is
-prepared ahead of the hardware.
+In this tutorial you will flash the Pico's built-in LED three times. You will
+then use an external pin to produce short groups of square waves, such as those
+used to drive an ultrasonic transducer.
 
-[Install CtrlAer](installation.md) on a board running MicroPython first. The code
-below runs **on the board**, for example from its REPL. Desktop Python can
-compile and preview programs, but cannot drive a board's PIO directly.
+You need a Raspberry Pi Pico or Pico 2 with [MicroPython and CtrlAer installed](installation.md).
+The code below runs **on the Pico**, using the MicroPython REPL in Thonny or a
+script copied to the board. Your computer supplies power and lets you edit the
+program.
 
-## Three short bursts
+## Flash the built-in LED
 
-This program produces three 2 ms bursts at 40 kHz. Each contains 80 carrier
-periods, followed by 8 ms LOW. The sequence lasts 30 ms, plus the 12 system-clock
-ticks used to apply the final mask and signal completion.
+The non-wireless Raspberry Pi Pico and Pico 2 have an LED connected to **GP25**,
+with its resistor built in. Connect the board to your computer by USB; you do
+not need any other components or wiring for this first program.
+
+```python
+from ctrlaer import CtrlAer, HIGH, OFF
+from machine import Pin
+
+LED_PIN = 25  # Built-in LED on a Raspberry Pi Pico or Pico 2.
+
+def blink():
+    for _ in range(3):
+        yield HIGH, 500
+        yield OFF, 500
+
+
+controller = CtrlAer(sm_number=0, base_pin=LED_PIN, n_pins=1)
+try:
+    controller.run(blink())
+    controller.block()
+finally:
+    controller.close()
+    Pin(LED_PIN, Pin.OUT, value=0)
+```
+
+The LED should flash three times. Each flash lasts half a second, with half a
+second of darkness after it. The complete sequence lasts three seconds.
+
+![Three half-second HIGH signals separated by half-second LOW signals](assets/first-levels.svg)
+
+### What the function says
+
+`yield HIGH, 500` tells CtrlAer to hold the output HIGH for 500 milliseconds.
+`yield OFF, 500` tells it to hold the output LOW for another 500 milliseconds.
+The loop repeats those two instructions three times.
+
+A Python function containing `yield` is called a **generator**. Instead of
+returning one result, it supplies one instruction at a time. This makes an
+experiment easy to build from loops, conditions and smaller functions. You do
+not need to turn your whole experiment into a long list of times.
+
+### What the controller does
+
+PIO (Programmable I/O) is hardware built into the RP2040 and RP2350. Its
+**state machines** carry out output instructions without a Python loop for
+each pin change. `sm_number` selects which state machine the controller uses.
+
+The constructor names three things explicitly:
+
+| Argument | Meaning in this example |
+|---|---|
+| `sm_number=0` | Use PIO state machine 0. Choose a different free number for another controller. |
+| `base_pin=LED_PIN` | Use GP25, which is connected to the built-in LED. The number identifies a GPIO, not a header position. |
+| `n_pins=1` | Use one output: the built-in LED. |
+
+`controller.run(blink())` reads the instructions and sends them to the PIO
+state machine. `controller.block()` waits for the last instruction to finish before
+Python moves on to cleanup. The PIO state machine continues to work while Python
+waits.
+
+### Why use `try` and `finally`?
+
+The code inside `finally` runs when the experiment finishes, and also when an
+exception occurs or you press **Ctrl-C**. `close()` stops the controller and
+releases the PIO state machine so that another program can use it. The final
+`Pin(...)` line puts the LED pin LOW, leaving the LED off.
+
+If you omit cleanup, an interrupted program can leave the output running or
+leave the pin HIGH. A later program may also report that the PIO state machine is
+already in use. Stopping Python alone does not reliably stop a signal produced
+by the Pico's PIO hardware. With the original `run()` interface, `close()`
+keeps the last pin level, which is why this example sets the LED pin LOW explicitly.
+
+### If your board has no built-in LED
+
+Use a free GPIO such as **GP0** and set `LED_PIN = 0` in the program above.
+Connect GP0 through a **1 kΩ resistor** to the LED's anode (usually the longer
+leg). Connect its cathode (usually the shorter leg, beside the flat side of
+the package) to **GND**. On a Pico, GP0 is physical pin 1 and GND is pin 3.
+
+![GP0 connects through a 1 kΩ resistor and LED to GND](assets/pico-led.svg)
+
+The resistor limits LED current. If your board has a GPIO-connected LED on a
+different pin, use that GPIO number instead. Pico W and Pico 2 W connect their
+LED through the wireless chip rather than a GPIO that CtrlAer can drive; use
+the external-LED circuit for those boards. The
+[official board layouts](https://www.raspberrypi.com/documentation/microcontrollers/pico-series.html#board-layouts)
+show this difference.
+
+## Produce a burst of square waves
+
+Some devices need a repeating electrical signal while they are active. For
+example, an ultrasonic driver might require a **40 kHz square wave**: 40,000
+cycles each second. One cycle consists of a HIGH interval followed by a LOW
+interval. At 40 kHz, a cycle lasts 25 microseconds.
+
+A **burst** is a short group of these cycles, followed by a pause. A 2 ms burst
+at 40 kHz contains 80 cycles. The next program produces three such bursts,
+with 8 ms of LOW output after each one. It uses **GP0**, an external output,
+rather than the built-in LED.
+
+To control an ultrasonic device, connect GP0 to the driver's 3.3 V-compatible
+signal input and connect Pico GND to the driver's logic ground. On a Pico these
+are physical pins 1 and 3. The driver supplies power to the transducer.
+
+![GP0 controls a driver, with the grounds connected](assets/pico-driver.svg)
+
+You can run the program without a driver to produce the electrical signal.
+Use a scope or digital input to inspect GP0; an LED cannot show individual
+40 kHz cycles.
 
 ```python
 from ctrlaer import CtrlAer, ON, OFF
+from machine import Pin
 
-def bursts():
+
+def ultrasound():
     for _ in range(3):
         yield ON, 2
         yield OFF, 8
 
-controller = CtrlAer(0, base_pin=6, n_pins=1, freq=40000)
+
+controller = CtrlAer(sm_number=0, base_pin=0, n_pins=1, freq=40_000)
 try:
-    run = controller.prepare(bursts())
-    run.start().wait(timeout_ms=1000)
+    controller.run(ultrasound())
+    controller.block()
 finally:
     controller.close()
+    Pin(0, Pin.OUT, value=0)
 ```
 
-`prepare()` consumes this finite generator, compiles its waveform and preloads
-DMA while playback is disabled. `start()` enables output; `wait()` waits for
-hardware completion and reports errors. `close()` releases the state machine
-and DMA channels. The default final mask is LOW.
+`freq=40_000` sets the frequency used by `ON`. `ON` produces the square wave;
+`HIGH` would hold the output at 3.3 V without oscillating. `OFF` holds it at 0 V.
 
-![Three bursts over the complete 30 ms program](assets/first-bursts.svg)
+![Three groups of 80 square-wave cycles, each followed by an 8 ms pause](assets/first-bursts.svg)
 
-At this scale the carrier edges form solid bands. The first 100 µs reveals four
-periods. `ON` is the original `PULSE10` command: LOW in the first half of each
-period, HIGH in the second half.
+The cycles are too close together to distinguish in the full view. The next
+figure expands the first 100 µs, where you can see four cycles. `ON` spends half
+of each cycle LOW and half HIGH.
 
-![The first four periods, starting LOW](assets/first-bursts-zoom.svg)
+![The first four 40 kHz cycles, with a 25 µs period](assets/first-bursts-zoom.svg)
 
-The output is the pin labelled **GP6**, rather than physical pin number 6; see
-the [physical-position table](wiring.md). No
-external wiring is required to run this example. To observe the signal, connect
-a digital input or instrument to GP6 and connect its ground to the board's GND.
-GPIO is a 3.3 V logic signal; connect a load through a suitable driver rather
-than connecting a motor, valve or atomiser directly to the GPIO.
+An LED will not let you distinguish these individual cycles. To inspect them,
+use a scope, logic analyser, or the [Pico's signal capture](digital-capture.md).
+An ultrasonic transducer itself needs an appropriate power driver; GP0 provides
+that driver's logic signal.
 
-## Commands and durations
+## Change or extend the experiment
 
-For one channel the original constants have these meanings:
+The durations after `yield` are in **milliseconds** unless you pass
+`use_ms=False`. With that option they are whole square-wave periods: at 40 kHz,
+`yield ON, 80` lasts 2 ms. Use milliseconds while learning the interface.
 
-| Command | Value | Output during one carrier period |
-|---|---:|---|
-| `LOW`, `OFF` | 0 | LOW throughout |
-| `PULSE01` | 1 | HIGH, then LOW |
-| `ON`, `PULSE10` | 2 | LOW, then HIGH |
-| `HIGH` | 3 | HIGH throughout |
+To repeat a sequence until you stop it, replace `for _ in range(3)` with
+`while True`. The original `run()` accepts this directly and keeps taking the
+next instruction as it needs it. An endless program never reaches the
+`controller.block()` line; Ctrl-C still runs the cleanup in `finally`.
 
-Durations normally use milliseconds. Original integer commands use whole
-carrier periods: a non-integer number of periods is truncated. At 40 kHz one
-period is 25 µs. With `use_ms=False`, a duration is a **number of carrier
-periods at the controller's `freq`**, not a number of system-clock ticks.
-
-`pulse(freq, duty=..., phase=...)` and `chirp(...)` supply a command's own
-frequency trajectory. Their millisecond durations are compiled to the nearest
-system-clock tick. Rich `pulse()` starts with its ideal rising edge at phase
-zero; this differs from the LOW-first `ON` constant. See the
-[command reference](api-reference.md) and [worked examples](examples.md).
-
-## Running indefinitely
-
-Finite preparation must reach the end of its generator. To use an unbounded
-generator, select buffered execution. For the same burst pattern, replace the
-`for` loop above with `while True`, prepare with `mode="buffered"`, then call
-`run.start()`. Output continues while the producer supplies buffers. Call
-`run.abort()` to stop it, and `controller.close()` when finished.
-
-Buffered execution supports hardware triggers and `wait_for()` inside the
-generator. It consumes bounded lookahead, so ordinary Python side effects may
-occur before their associated output. Use eager execution when Python must
-observe each completed command before deciding the next one. See
-[execution modes](execution-modes.md) for runnable examples, memory budgets and
-timing guarantees.
-
-## Multiple outputs and state machines
-
-`mux([a(), b()])` assigns its generators to consecutive GPIOs starting at
-`base_pin`: for example GP6 and GP7 with `base_pin=6, n_pins=2`. Original integer
-commands share the controller's carrier. Rich commands can describe independent
-carriers, subject to the minimum spacing between merged edges. A `Group` can
-start separate prepared state machines together; see
-[triggers and groups](triggers-and-groups.md).
-
-RP2040 has eight state machines, numbered 0–7, and RP2350 has twelve, numbered
-0–11. Blocks contain four state machines each. Controllers must use different
-state machines and non-overlapping output GPIOs. Capture also consumes a state
-machine and DMA resources.
-
-The original `controller.run(program)` API remains available. Its `block`
-argument controls waiting for FIFO space; it does **not** establish that the
-last queued edge has played. Use `controller.block()` for completion with that
-API, or choose one of the explicit execution modes above.
+When you need two devices to act together, give each one its own function and
+combine them with [`mux()`](examples.md). For square waves with adjustable duty
+cycle, frequency sweeps or external triggers, continue with the relevant worked
+example. [Running an experiment](execution-modes.md) explains the available
+execution controls and their trade-offs.

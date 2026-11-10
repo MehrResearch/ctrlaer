@@ -39,15 +39,15 @@ signal.value(1)
 sleep_us(20)
 signal.value(0)
 begin=ticks_us()
-from ctrlaer import CtrlAer,chirp
+from ctrlaer import CtrlAer,sweep
 controller=CtrlAer(0,link_pin,1)
 software_start=None
 try:
  if selected_mode=='eager':
-  run=controller.run([(chirp(90000,120000,sweep_ms=selected_sweep_ms),20)],mode='eager')
+  run=controller.run([(sweep(90000,120000,sweep_ms=selected_sweep_ms),20)],mode='eager')
  else:
   duration=60000 if selected_mode=='buffered' else 20
-  run=controller.prepare([(chirp(90000,120000,sweep_ms=selected_sweep_ms),duration)],mode=selected_mode)
+  run=controller.prepare([(sweep(90000,120000,sweep_ms=selected_sweep_ms),duration)],mode=selected_mode)
   run.start()
   software_start=ticks_diff(ticks_us(),begin)
   if selected_mode=='buffered':

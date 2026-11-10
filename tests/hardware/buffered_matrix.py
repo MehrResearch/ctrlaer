@@ -4,7 +4,7 @@ GP8 through GP12 are internal/unconnected outputs, restored to inputs. No
 external wiring; allow 60 seconds for all six workloads. Statistics are gathered
 after abort, so heap scanning cannot stall an active waveform.
 """
-from ctrlaer import CtrlAer, ON, OFF, PULSE01, chirp, mux
+from ctrlaer import CtrlAer, ON, OFF, PULSE01, sweep, mux
 from machine import Pin
 from time import sleep_ms, ticks_ms, ticks_diff
 import gc
@@ -42,10 +42,10 @@ try:
             ('integer_mux_2', 2, lambda: mux([phase_a(), phase_b()])),
             ('integer_mux_5', 5, lambda: mux([phase_a(), phase_b(), phase_a(),
                                             phase_b(), phase_a()])),
-            ('repeated_chirp', 1, lambda: bursts(chirp(90000, 120000, sweep_ms=2))),
+            ('repeated_chirp', 1, lambda: bursts(sweep(90000, 120000, sweep_ms=2))),
             ('descending_chirp', 1, lambda: continuous(
-                chirp(120000, 90000, sweep_ms=2, duty=.4, phase=.25))),
-            ('default_20ms_sweep', 1, lambda: continuous(chirp(90000, 120000)))):
+                sweep(120000, 90000, sweep_ms=2, duty=.4, phase=.25))),
+            ('default_20ms_sweep', 1, lambda: continuous(sweep(90000, 120000)))):
         controller = CtrlAer(0, 8, count)
         run = controller.prepare(source, mode='buffered')
         run.start()

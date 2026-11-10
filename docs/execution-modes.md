@@ -1,207 +1,178 @@
-# Choose how a generator executes
+# Running an experiment
 
-All modes use the same `(command, duration)` generator vocabulary. The choice
-controls when Python advances and how much waveform data is prepared ahead.
+An experiment can repeat a sequence for as long as needed, including while it
+waits for external triggers. Use a `while True` loop to describe that repetition.
+The examples below start with a repeating square wave, then add a trigger or a
+measurement.
 
-| Mode | Entry point | Python advances | Output timing | Memory |
-|---|---|---|---|---|
-| Finite prepared | `prepare(program)` | Before starting | PIO/DMA throughout the prepared program | Grows with the compiled waveform |
-| Buffered | `prepare(program, mode="buffered")` | With bounded lookahead during playback | PIO/DMA across chunk boundaries while production keeps up | Fixed-size waveform buffers |
-| Eager | `run(program, mode="eager")` | After each yielded command finishes | PIO/DMA within a command; Python gaps between commands | Fixed-size waveform buffers |
-| Original FIFO | `run(program)` | While feeding the small hardware FIFO | Original shared-frequency oscillator | Small FIFO; integer commands only |
+## Repeat until you stop the experiment
 
-`prepare` returns an inactive run. Call `start()` to enable output, then `wait()`
-to supervise it synchronously. A soft timer also services an active run, allowing
-the application to do other work after `start()`. Python work still shares the
-interpreter with buffered production: long blocking calls can miss a deadline.
-On the PSRAM-enabled Pico Plus 2 firmware, even `gc.mem_alloc()`/`gc.mem_free()`
-can block for roughly 158 ms while scanning the heap. Inspect heap statistics
-before starting, after stopping, or while a hardware gate deliberately pauses
-the waveform; do not use them as live per-refill instrumentation.
-
-## Buffered: indefinite programs with hardware triggers
+Suppose a device needs a 40 kHz square wave for 2 ms, followed by an 8 ms pause.
+This program repeats that ten-millisecond cycle until you stop it:
 
 ```python
-from ctrlaer import CtrlAer, pulse, OFF, wait_for
+from ctrlaer import CtrlAer, ON, OFF
+from machine import Pin
+
+def experiment():
+    while True:
+        yield ON, 2
+        yield OFF, 8
+
+controller = CtrlAer(sm_number=0, base_pin=0, n_pins=1, freq=40_000)
+try:
+    controller.run(experiment())
+finally:
+    controller.close()
+    Pin(0, Pin.OUT, value=0)
+```
+
+Connect GP0 to the device's 3.3 V-compatible control input and connect its ground
+to Pico GND. On a Pico, GP0 is physical pin 1 and GND is pin 3. A motor or
+transducer needs an appropriate power driver; the Pico supplies its control
+signal.
+
+To stop a script running at the MicroPython REPL, press **Ctrl-C**. The `finally`
+block stops the PIO state machine and puts GP0 LOW. Without this cleanup,
+interrupting Python can leave the hardware running or the output HIGH.
+
+`run()` keeps reading the next instruction as space becomes available in the
+PIO queue. An `ON` instruction describes an entire group of square-wave cycles,
+so the program does not store every HIGH and LOW change. Repeating for an hour
+uses the same small queue as repeating for a second.
+
+## Wait for a trigger on every repetition
+
+A detector or another instrument may determine when the next cycle starts.
+Put `wait_for()` inside the loop so that every repetition waits for a new input.
+This example uses GP6 as the trigger input and GP0 as the output:
+
+```python
+from ctrlaer import CtrlAer, square_wave, OFF, wait_for
 from machine import Pin
 
 Pin(6, Pin.IN, Pin.PULL_DOWN)
 
 def shots():
     while True:
-        wait_for(6, timeout_ms=None)
-        yield pulse(108050), 20
-        yield OFF, 100
+        wait_for(pin=6)
+        yield square_wave(freq=40_000), 2
+        yield OFF, 8
 
-controller = CtrlAer(0, 0, 1)
+controller = CtrlAer(sm_number=0, base_pin=0, n_pins=1)
 try:
-    run = controller.prepare(shots, mode="buffered", buffer_words=4096)
-    run.start().wait()  # Runs until abort, an error, or interruption.
+    run = controller.prepare(shots, mode="buffered")
+    run.start().wait()
 finally:
     controller.close()
 ```
 
-GPIO0 is the drive output; GPIO6 receives a 3.3 V logic trigger, and the trigger
-source shares ground with the board. Use the board's **GPIO labels**, not header
-position numbers. See [triggers](triggers-and-groups.md) for wiring and edge
-semantics. Each new rising edge produces one burst after the gate has observed
-LOW then HIGH. Edges during the burst/rest are not queued. A gate can wait forever
-without accumulating waveform data or imposing a total program-duration limit.
+Connect a 3.3 V trigger output to GP6 and share its ground with the Pico. The
+[trigger guide](triggers-and-groups.md) includes the instrument connection and
+a button you can use to try it by hand.
 
-An initial `trigger=Trigger(...)` waits once before the first command. A
-`wait_for(...)` inside the loop waits again on each iteration. Trigger waits run
-in PIO; they do not poll the pin from Python.
+The program waits for GP6 to be LOW and then HIGH. It produces the two-millisecond
+square wave, stays LOW for eight milliseconds, then waits again. Trigger pulses
+received during the output or pause are ignored. A wait with no timeout can last
+indefinitely. Stop the experiment with Ctrl-C, or call `run.abort()` from your
+application; both paths leave the prepared output LOW by default.
 
-### What a chunk boundary does
+### What buffering does
 
-Chunk boundaries do not introduce a new output edge, apply `final_mask`, restart
-carrier phase or restart a frequency sweep. A single yielded command may span
-many chunks. For example, a 1 s chirp with `sweep_ms=2` continues through 250 up/down
-frequency triangles without storing a 1 s waveform in RAM.
+Hardware input waits and adjustable signals such as `square_wave()` and `sweep()`
+use instructions that specify when individual output changes occur. Storing
+the complete output of a repeating experiment would eventually exhaust memory.
+With `mode="buffered"`, CtrlAer calculates a few sections ahead while PIO plays
+earlier ones, reusing the storage as it goes. The experiment can keep running
+without its waveform storage growing over time.
 
-The runtime uses four chained transmit DMA channels and one prepared spare
-buffer. An allocation-free DMA interrupt installs the ready spare into a
-completed channel; Python fills the newly freed buffer. This leaves several
-chunks of hardware playback ahead of Python, including time to absorb occasional
-interpreter pauses. Sparse chunks transfer only their actual word count.
+An individual instruction can span many sections. For example, a ten-second
+frequency sweep continues through those sections without restarting its
+frequency or phase at each boundary.
 
-Every internal chunk ends with a blocking guard until its successor is ready.
-Publishing a successor changes that guard to a NOP. Its time is
-taken from an existing hold, preserving nominal edge times. If the producer is
-late, the guard prevents stale cyclic DMA data from being replayed. The soft
-service reports `UnderrunError`, stops playback and drives `final_mask`.
+Buffering reserves 96 KiB for waveform storage by default and uses six DMA
+channels per controller. Python must prepare each new section before PIO needs
+it. A long file write or a slow calculation can delay that work; if data runs
+out, CtrlAer reports `UnderrunError` and stops at the final output levels. The
+last level can remain in place until Python handles the error.
 
-An error may leave the last digital level asserted until the software service
-handles it. This is an error-detection mechanism, not a hardware safety interlock.
+`buffer_words` changes the amount of storage. A smaller buffer saves memory but
+leaves less time to recover from a Python pause. The
+[performance examples](performance.md) explain the difference between holding
+a level, producing square waves and sweeping frequency.
 
-### Buffer size and resources
+### When does code between instructions run?
 
-`buffer_words` is the capacity of **each** buffer and must be a power of two from
-32 to 8192. Five waveform buffers are retained; alignment requires an allocation
-of six times `buffer_words * 4` bytes. At the default 4096 words this allocation
-is 96 KiB. Edge scratch space, event reception, metadata and an optional bounded
-chirp cache also need storage. At the default capacity, edge scratch reuses the
-pool's alignment slack outside all DMA read rings; it needs no additional 8 KiB
-allocation. The two 1 KiB event-receive rings also occupy disjoint portions of
-that slack, avoiding separate aligned receive allocations. Smaller capacities
-can require separate scratch/receive storage.
+Buffering reads the function ahead of the output. If you read a sensor after
+`yield square_wave(...), 20`, that read may happen while CtrlAer is preparing
+the signal, before the device has received it. The same applies to global
+assignments, ordinary `print()` calls and other Python operations.
 
-Chirps whose phase does not repeat use a bounded inverse-phase lookup instead.
-The table is independent of ON duration, but changing sweep settings can require
-a new contiguous allocation. The Tiny's non-moving heap can reject that
-allocation after other work has fragmented memory, even when a clean interpreter
-can run the same waveform. Keep buffers/tables within the available heap;
-the PSRAM-enabled Pico Plus 2 has substantially more room.
-
-Each buffered run claims one PIO state machine, four TX DMA channels and two RX
-DMA channels. Two such runs use all twelve DMA channels of an RP2040; digital
-capture needs another channel. RP2350 has sixteen DMA channels. Available heap and channels depend on other application
-activity; larger buffers can fail allocation on a Tiny.
-
-Dense waveforms consume a buffer sooner than sparse holds. Increasing buffer
-size absorbs longer scheduling pauses but cannot fix a producer whose average
-rate is below the playback rate. An interval also needs room for the guard's six
-ticks. Extremely dense schedules that cannot place a time-neutral guard are
-rejected explicitly. See [performance](performance.md) for measured costs and
-parameter ranges.
-
-### Python effects and bounded state
-
-Generator code runs ahead of the corresponding output. Global assignments,
-ordinary `print`, file I/O and arbitrary Python calls happen during lookahead.
-CtrlAer accepts those side effects; it does not attempt to undo or analyse them.
-
-Use CtrlAer's `sleep`, `print` and `wait_for` for operations that belong to playback
-order. Sleep holds the last digital mask; it does not continue a completed
-carrier. Print notifications and timeout supervision have interpreter/service
-latency. GPIO waits and waveform edges remain hardware timed.
-
-A generator must yield regularly: up to 64 managed effects may be queued during
-one advance by default (`max_pending_effects`). This bounds an effects-only loop
-that would otherwise never return control to the compiler. The program itself
-can still allocate or retain arbitrary user data.
-
-`gate_history` and `effect_history` retain the latest 128 observations by default.
-Use `history_limit` to change that bound or `0` to retain none. Event marker IDs
-roll over without growing the receive buffers. Receive-ring corruption or loss
-is an explicit error.
-
-Pass a generator **factory** to allow `rearm()` after completion or abort. A
-consumed iterator cannot be rewound; a buffered run prepared from one must be
-replaced with a fresh iterator. Closing a buffered run releases its waveform
-buffers even if you retain the closed run object. Replacing an inactive open
-buffered run through `controller.prepare(...)` reuses its waveform pool when
-the capacity matches, avoiding a second large allocation on a fragmented heap.
-Its generator, phase, markers and receive rings are reset for the new run.
+CtrlAer's `print`, `sleep` and `wait_for` put a message, pause or input wait in
+the output sequence. They are useful for following progress or waiting for
+another instrument. Use the next example when the result of a sensor read
+must determine what happens after a physical action.
 
 ## Eager: measurements and ordinary Python in sequence
 
+Suppose a light should illuminate a sample for 20 ms, then switch off before
+you read a sensor. With `mode="eager"`, CtrlAer completes those timed actions
+before reading the sensor. The
+[light-and-sensor example](examples.md#use-python-measurements-between-commands)
+includes the complete code and connections.
+
+To repeat that measurement, put its instructions and sensor read inside a
+`while True` loop. Each reading can then determine the next illumination time
+or whether the experiment should stop. Python takes additional time to read
+the sensor and prepare the next signal, so the time between repetitions varies.
+The output stays at its last level during that work; an `OFF` instruction before
+the measurement keeps the light off.
+
+Eager execution uses the buffered implementation one instruction at a time,
+with the same memory allocation. It waits inside `run()`, so `block=False` is
+not supported. Use buffered output when the signal must follow a trigger at a
+fixed delay; eager output also needs time for Python to prepare the next action
+after a wait ends.
+
+## Prepare a complete sequence for inspection or replay
+
+For a sequence with a known end, `prepare()` can calculate and check all output
+before starting. This lets you preview the signal and repeat exactly the same
+stored data. It also removes the need for Python to prepare more data while
+that sequence plays.
+
 ```python
-from ctrlaer import CtrlAer, pulse, OFF, sleep, print
-from machine import ADC
+from ctrlaer import CtrlAer, square_wave, OFF
 
-sensor = ADC(ADC.CORE_TEMP)  # Internal temperature channel; no external wiring.
+def one_cycle():
+    yield square_wave(freq=40_000), 2
+    yield OFF, 8
 
-def feedback():
-    while True:
-        yield pulse(108050), 20
-        yield OFF, 100
-        reading = sensor.read_u16()  # Both preceding commands have finished.
-        print("raw temperature ADC:", reading)
-        sleep(0.1)
-
-controller = CtrlAer(0, 0, 1)
+controller = CtrlAer(sm_number=0, base_pin=0, n_pins=1)
 try:
-    controller.run(feedback(), mode="eager")
+    run = controller.prepare(one_cycle())
+    run.start().wait(timeout_ms=1000)
 finally:
     controller.close()
 ```
 
-![Eager feedback order, with LOW held during Python work](assets/eager-order.svg)
+Storage grows with the number of output changes. Use this for a complete
+sequence that fits in memory, or prepare a short sequence once and `rearm()` it
+between measurements. To preview an experiment that loops forever, give
+`compile_program()` a `window_ms`; it calculates just that time window. See
+[previews](analysis-and-records.md#preview-a-repeating-experiment) and
+[preparing and replaying](prepared-execution.md) for examples.
 
-The schematic shows execution order; Python gaps have no prescribed duration.
-The ADC is internal, so it needs no wiring. GP0 is the drive output; connect a
-compatible driver input and common GND as shown in the [wiring guide](wiring.md).
-`ADC.CORE_TEMP` selects the firmware's internal-temperature channel across the
-two chip packages; see [MicroPython's RP2 ADC implementation](https://github.com/micropython/micropython/blob/master/ports/rp2/machine_adc.c).
+## Why isn't buffering the default?
 
-Eager execution finishes one yielded command before resuming Python. The ADC
-read therefore happens after the burst and its 100 ms LOW rest. This example prints a raw ADC reading;
-it does not convert or calibrate a temperature. The carrier remains PIO/DMA timed,
-and long commands are still chunked with bounded memory.
+The `run()` path used in the first example generates fixed-frequency `ON`
+signals with little memory and a compact PIO loop. Buffering supports hardware
+waits, adjustable duty cycles and sweeps, but reserves more memory and transfer
+channels and requires Python to keep producing data.
 
-Between commands, the last digital level is held while Python runs and the next
-command is prepared. Reusing the engine does not reinitialise the pins to LOW.
-Those gaps are deliberately not real-time; their duration includes Python work,
-compilation, garbage collection and service overhead. Managed sleep preserves
-the same level, and managed gates use the same PIO wait mechanism as buffered
-execution. Use explicit OFF/LOW commands when you want an output deasserted
-before a measurement or other Python operation.
-After a gate releases, Python resumes and prepares the next command too. Use
-buffered execution when the output must follow a trigger with only the fixed
-PIO control overhead.
-
-Eager `run` is synchronous (`block=False` is rejected). Normal EOF, abort and
-errors apply `final_mask`. A Python generator exception also applies that mask
-before propagating the exception. The returned run object can be inspected and
-closed after a finite eager program. Histories, elapsed time and production
-counters cover the whole eager run, including Python/preparation gaps. An abort
-or close between fragments prevents later commands from playing. Ordinary
-Python already executing resumes until its next yield or managed operation.
-
-## Keep finite analysis for reviewable experiments
-
-Finite preparation is useful when you want to validate the whole waveform,
-preview it, save its exact packets or replay the same data repeatedly. It cannot
-consume an infinite generator without an explicit finite analysis window.
-
-A buffered run has no single complete `CompiledProgram`: its future may depend
-on Python that has not executed yet. To preview an indefinite generator, use
-`compile_program(factory, window_ms=...)` on a separate invocation. That preview
-also runs arbitrary Python side effects, just like other analysis.
-
-The original `run(program)` remains available for existing integer-command
-programs. Its `block` argument controls waiting for FIFO space, not waiting for
-the last output to finish. Call `controller.block()` to wait for completion, and
-retain the returned iterator when using `block=False`. Explicit eager/buffered
-`run` modes have the execution semantics described above.
+The current default keeps that small `run()` path for integer commands such
+as `ON`, `OFF` and `HIGH`. For a sequence that ends, call `controller.block()`
+after `run()` to wait for the last output to finish. The `block` argument to
+`run()` controls waiting for queue space, which is a different operation.
+The [controller reference](api/controller.md) covers nonblocking submission
+and the arguments accepted by each entry point.

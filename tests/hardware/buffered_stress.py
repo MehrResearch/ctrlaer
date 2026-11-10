@@ -4,7 +4,7 @@ No external wiring. GP8 is the output and returns to input. Heap statistics are
 read only after stopping: scanning an RP2350 PSRAM heap can block for 158 ms.
 The seven workloads take about four minutes at the default 30 seconds each.
 """
-from ctrlaer import CtrlAer, pulse, chirp, OFF
+from ctrlaer import CtrlAer, square_wave, sweep, OFF
 from machine import Pin
 from time import sleep_ms, ticks_ms, ticks_diff
 import gc
@@ -21,27 +21,27 @@ def continuous(command):
 
 def bursts():
     while True:
-        yield pulse(108050),20
+        yield square_wave(108050),20
         yield OFF,20
 
 def chirp_bursts():
     while True:
-        yield chirp(90000,120000,sweep_ms=2),20
+        yield sweep(90000,120000,sweep_ms=2),20
         yield OFF,20
 
 def nonperiodic_bursts():
     while True:
-        yield chirp(90001,120000,sweep_ms=2),20
+        yield sweep(90001,120000,sweep_ms=2),20
         yield OFF,20
 
 try:
     for name,source in (
-            ('continuous_pulse',lambda:continuous(pulse(108050))),
-            ('continuous_chirp',lambda:continuous(chirp(90000,120000,sweep_ms=2))),
+            ('continuous_pulse',lambda:continuous(square_wave(108050))),
+            ('continuous_chirp',lambda:continuous(sweep(90000,120000,sweep_ms=2))),
             ('bursts',bursts),
             ('repeated_chirp',chirp_bursts),
-            ('default_sweep',lambda:continuous(chirp(90000,120000))),
-            ('nonperiodic_chirp',lambda:continuous(chirp(90001,120000,sweep_ms=2))),
+            ('default_sweep',lambda:continuous(sweep(90000,120000))),
+            ('nonperiodic_chirp',lambda:continuous(sweep(90001,120000,sweep_ms=2))),
             ('nonperiodic_bursts',nonperiodic_bursts)):
         run=controller.prepare(source,mode='buffered')
         run.start()

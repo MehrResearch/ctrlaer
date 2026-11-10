@@ -1,92 +1,56 @@
-# Pins and physical connections
+# Connecting a Raspberry Pi Pico
 
-CtrlAer uses **GPIO numbers**: `base_pin=6` means GP6. Header position 6 is a
-different pin. With multiple channels, the next channel uses the next GPIO, so
-`base_pin=6, n_pins=2` drives GP6 and GP7.
+A CtrlAer program controls the Pico's **GPIO pins**. These carry 3.3 V logic
+signals: HIGH is approximately 3.3 V and LOW is approximately 0 V. Connect the
+signal to the control input of your instrument or driver, and connect their
+grounds so that both devices use the same voltage reference.
 
-## Find the right pad
+This page uses the standard **Raspberry Pi Pico and Pico 2** layout. Place the
+board with its components facing you and the USB connector at the top. The left
+row is numbered from 1 at the top to 20 at the bottom; the right row continues
+from 21 at the bottom to 40 at the top.
 
-The table below uses a component-side view with the USB connector at the top.
-On the Tiny, header positions run down the left side from 1 to 8 and up the
-right side from 9 to 16. On the Pico Plus 2 they run down the left from 1 to 20
-and up the right from 21 to 40.
+![Pico pin positions used in the tutorials, viewed from above with USB at the top](assets/pico-pins.svg)
 
-| GPIO / connection | Tiny 2040 physical position | Pico Plus 2 physical position |
-|---|---:|---:|
-| GP0 | 16 | 1 |
-| GP1 | 15 | 2 |
-| GP6 | 10 | 9 |
-| GP7 | 9 | 10 |
-| GND used in the diagram | 8 | 8 |
-| Alternative GND | 2 | 3 |
-| 3V3 output | 3 | 36 |
+## GPIO names and physical positions
 
-Verify orientation against the manufacturer's
-[Tiny 2040 pinout](https://cdn.shopify.com/s/files/1/0174/1800/files/tiny-2040-pinout-diagram_4dd9e9ab-6f6f-4b63-82d4-16793d109f17.png?v=1614260173)
-and [Pico Plus 2 pinout](https://cdn.shopify.com/s/files/1/0174/1800/files/ppico_plus_2_pinout_diagram.pdf?v=1723557334).
-The Tiny's GP8/GP9 are not exposed on its headers. Hardware regression scripts
-can observe those pads internally, but they are unsuitable instructions for
-external jumper wiring.
+The name printed on the board is the one used in Python. For example,
+`base_pin=0` selects **GP0**, at physical pin 1. `base_pin=6` selects **GP6**, at
+physical pin 9. The number after `GP` and the header position are different
+numbering systems.
 
-## Two boards: send and verify in either direction
+| Printed label | Physical pin | Used for |
+|---|---:|---|
+| GP0 | 1 | External output in the waveform and driver examples |
+| GP1 | 2 | Second output in two-channel examples |
+| GND | 3 | Ground for an LED, driver or instrument |
+| GP2, GP3, GP4 | 4, 5, 6 | Additional output channels |
+| GND | 8 | A convenient ground near the trigger input |
+| GP6 | 9 | Trigger input in the tutorials |
+| GP7 | 10 | An alternative output or input |
+| GP16 | 21 | Valve-control output in the older dosing example |
+| GP25 | Built into board | LED on a non-wireless Pico or Pico 2 |
+| GP26 | 31 | Analogue sensor input in the measurement example |
+| 3V3(OUT) | 36 | 3.3 V supply for the push-button example |
 
-Power each board over its own USB data cable. Add just these two connections:
+The [official Pico/Pico 2 pinout](https://pip-assets.raspberrypi.com/categories/1005-raspberry-pi-pico-2/documents/RP-008301-DS-1-Pico-2-Pinout.pdf?disposition=inline)
+shows every pin and its other uses. For a different board, find the **same GPIO
+label** on that board's pinout; its physical position may be different.
 
-| Tiny 2040 | Pico Plus 2 | Purpose |
-|---|---|---|
-| GP6, position 10 | GP6, position 9 | Digital signal |
-| GND, position 8 | GND, position 8 | Shared signal reference |
+## Which connections do I need?
 
-![Two USB-powered boards linked by GP6 and GND](assets/board-link.svg)
+Follow the connections in the example you are running. They are alternatives,
+not a setup checklist. The built-in LED example needs only USB. Later examples
+give their own connections immediately before or after the code:
 
-The diagram shows connections, rather than a scaled board layout. Other GND
-pads in the table are equivalent. The 3V3, VBUS and VSYS supply rails are not
-part of this USB-powered link.
+| Example | Connections |
+|---|---|
+| [First LED flashes](getting-started.md#flash-the-built-in-led) | USB only on a Pico or Pico 2; an optional external LED circuit is shown there too |
+| [Light and camera](examples.md) | GP0 to the light driver, GP1 to the camera trigger, and common GND |
+| [External trigger](triggers-and-groups.md) | Trigger output to GP6, output to the controlled device on GP0, and common GND |
+| [Light and sensor](examples.md#use-python-measurements-between-commands) | GP0 to the light driver, sensor output to GP26, and common GND |
+| [Measure a signal](digital-capture.md) | No extra wiring to measure the Pico's own output; the second-Pico connection is explained in that example |
 
-Only the sender configures GP6 as an output. The receiver observes GP6 as an
-input. The test tools return both pads to inputs before exchanging roles and
-after the test. A state machine driving a pad can coexist with an input sampler
-observing that same pad; do not separately reconfigure it as `Pin.IN` while it
-is being driven.
-
-With the current checkout installed on both boards:
-
-```sh
-python3 tools/cross_board.py \
-  --tiny-port /dev/cu.usbmodem3101 --pico-port /dev/cu.usbmodem101 \
-  --gpio 6 --no-leds --out-dir work/cross-board
-```
-
-Replace the example port names with those enumerated by
-`uv run tools/install.py --list`. This test sends a marker, fixed-frequency
-bursts and a triangular chirp, then compares the peer's captured edges with the
-compiled schedule. It repeats with the roles reversed. See
-[performance](performance.md) for the waveform and acceptance limits.
-
-## Trigger an experiment
-
-The trigger examples use **GP6 as input** and **GP0 as drive output**. Connect
-your trigger source's 3.3 V logic output to GP6 and its ground to board GND.
-Connect GP0 to the logic input of your experiment's driver. Its logic ground
-also joins board GND. Configure `Pin(6, Pin.IN, Pin.PULL_DOWN)` before preparing
-the program; do not use GP6 as one of that controller's outputs.
-
-For a manual trial, a momentary switch between the board's 3V3 pin and GP6
-can supply a rising edge with that pull-down configuration. Mechanical contact
-bounce can produce several edges; use a clean external logic source when
-checking trigger timing or retriggering. See [trigger semantics](triggers-and-groups.md).
-
-## Observe a waveform without a second board
-
-`DigitalCapture` can sample a controller's own output pad using another state
-machine, with no loopback jumper. Give it the output's GPIO and a different
-`sm_number`. This checks relative edge timing using a shared oscillator. The
-two-board link additionally uses independent oscillators; neither measurement
-establishes analogue drive quality or atomiser behaviour.
-
-## Connect an external load
-
-The GPIO supplies 3.3 V logic. Connect it to a compatible driver input and
-connect the logic grounds. A motor, valve, bridge power stage or atomiser needs
-its own suitable power driver and supply. The examples specify the digital
-waveform at the driver input; choosing the power circuit depends on the load.
+Pico GPIOs carry 3.3 V control signals. A driver powers a light, motor, valve or
+transducer; the GPIO connects to its control input. Join the devices' signal
+grounds, and check that an external output is suitable for a 3.3 V Pico input.

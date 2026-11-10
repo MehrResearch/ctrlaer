@@ -1,0 +1,734 @@
+{
+  "schema": "ctrlaer.triggered-validation/v1",
+  "date": "2026-11-10",
+  "development_branch": "codex/incremental-execution",
+  "development_base_commit": "beeb78840c3d45b9604a11fd9a06bf1be6a94b56",
+  "working_tree_changes": true,
+  "remote_main_restored_to": "0b52d86579bd87a12aca8b26b7b4ef76a785af92",
+  "remote_main_commit_date": "2025-09-10",
+  "remote_main_subject": "Update citation.",
+  "boards": {
+    "tiny": {
+      "active_pio_masks": [
+        0,
+        0
+      ],
+      "all_dma_channels_reusable": true,
+      "manifest": {
+        "architecture": "armv6m",
+        "files": {
+          "ctrlaer_native.mpy": "50f073df988ba95221c63ba95f3b3d9e03cc4f35547b1580800dbbd49e701422",
+          "ctrlaer_records.mpy": "2be79ea8654fe6330df1e6087c3f84a2bc7b084fc234049d4e7ef449b5b6ffc9",
+          "ctrlaer.mpy": "a9151538d09d3c3d804d7ad38f625e3ffbc925123b1e0e6d392bbb448d1eab56",
+          "ctrlaer_stream.mpy": "431d0276c3aa1c7c9371625e90f82a23b250762ea2d9b8e37a9d48964c33e865",
+          "ctrlaer_program.mpy": "8509de85e4c0dce8972b8a7299f7c91c1275e11b0aed3071ad00dedf28facad1",
+          "ctrlaer_commands.mpy": "810774cfced3da6781fa2bb2ea4a049a6ecf8f5fc4683dfbd810fe339484e655",
+          "ctrlaer_capture.mpy": "0a98d8e46182a497ca1bec77271538c2487559a48c2e187034d7add7d021d5fc",
+          "ctrlaer_tools.mpy": "ca3fe5ec3c25dd1ac5c989e9dfe7ae5614916bc7849595ed948d3ca2cd7161e5",
+          "ctrlaer_buffered.mpy": "d196940407ffa6f47ee940d1b35c056a29567ee79a59b39a9179cacb29546603",
+          "ctrlaer_runtime.mpy": "f404d5e7a4653981c71d65029d7860c60166f4f96b837aad0a83448cc8c9e798"
+        },
+        "source": {
+          "commit": "beeb78840c3d45b9604a11fd9a06bf1be6a94b56",
+          "kind": "checkout",
+          "dirty": true
+        },
+        "version": "0.2.0",
+        "schema": "ctrlaer.install/v1",
+        "source_sha256": {
+          "ctrlaer_native": "c26c6187fe744fb133698f26ae04da3fffa9e79309682cd82e5bb762e07e06c2",
+          "ctrlaer_program": "2a5f159f6eacd316f7f753ffe7407fa4ac4ba825a7e772aaf947c717adec4b3e",
+          "ctrlaer": "679a72a3e4d7760984ea9f692dee1439f3e3ff734be68b42ed9eb6c1b7a0821a",
+          "ctrlaer_records": "5fc3b3ffe19b77cfa78f40f4e5cca0da4cd1653f4925724b896dd9ad74e634ec",
+          "ctrlaer_buffered": "eb70ea27dc29ae50610fbaee21f17fe8e55110feb97395bc19e71da0b0270a02",
+          "ctrlaer_runtime": "41c9a932e18d2e17a0ff8cf181a9ff5411f3a1fd0b0e3fc0e49d0a1419846cf6",
+          "ctrlaer_tools": "4b366930f5adb76199423e06caaf86745d54fd4f68a9b6cd29f848ddbcc8f576",
+          "ctrlaer_commands": "b17ceca47120ce50cfd20a254c658e51a53d4a00bc3e1cc9bba2503eb0005747",
+          "ctrlaer_stream": "f5f4f8f00e107ea96f334bbc9b8a2d86739ac9d566c154ba08df4e4474f02eb6",
+          "ctrlaer_capture": "48a3ac0c0727888b1390345ccce0064231d13fb783794d6b2235fcd042b8bf5e"
+        },
+        "firmware": {
+          "platform": "rp2",
+          "mpy": 4870,
+          "clock_hz": 125000000,
+          "board": "Pimoroni Tiny 2040 2MB with RP2040",
+          "firmware": "3.4.0; MicroPython v1.29.0 on 2026-08-24",
+          "version": [
+            1,
+            29,
+            0,
+            ""
+          ]
+        },
+        "modules": [
+          "ctrlaer",
+          "ctrlaer_commands",
+          "ctrlaer_program",
+          "ctrlaer_runtime",
+          "ctrlaer_capture",
+          "ctrlaer_tools",
+          "ctrlaer_records",
+          "ctrlaer_native",
+          "ctrlaer_stream",
+          "ctrlaer_buffered"
+        ]
+      },
+      "leds_off": true
+    },
+    "pico": {
+      "active_pio_masks": [
+        0,
+        0,
+        0
+      ],
+      "all_dma_channels_reusable": true,
+      "manifest": {
+        "architecture": "armv7emsp",
+        "files": {
+          "ctrlaer_native.mpy": "71d12d176607797252cd4850f150e3f89e1b2334d5fbc76d8b7e088aed153737",
+          "ctrlaer_records.mpy": "2be79ea8654fe6330df1e6087c3f84a2bc7b084fc234049d4e7ef449b5b6ffc9",
+          "ctrlaer.mpy": "a9151538d09d3c3d804d7ad38f625e3ffbc925123b1e0e6d392bbb448d1eab56",
+          "ctrlaer_stream.mpy": "431d0276c3aa1c7c9371625e90f82a23b250762ea2d9b8e37a9d48964c33e865",
+          "ctrlaer_program.mpy": "8509de85e4c0dce8972b8a7299f7c91c1275e11b0aed3071ad00dedf28facad1",
+          "ctrlaer_commands.mpy": "810774cfced3da6781fa2bb2ea4a049a6ecf8f5fc4683dfbd810fe339484e655",
+          "ctrlaer_capture.mpy": "0a98d8e46182a497ca1bec77271538c2487559a48c2e187034d7add7d021d5fc",
+          "ctrlaer_tools.mpy": "ca3fe5ec3c25dd1ac5c989e9dfe7ae5614916bc7849595ed948d3ca2cd7161e5",
+          "ctrlaer_buffered.mpy": "d6286b1017ea44bb239bfc8a0abe303e448a1c10a7a7b25919eed76107952f31",
+          "ctrlaer_runtime.mpy": "c8d3690d6397bcb4eeb9ef8b20850970c2f57cba2587176bc0be94d48d8c421a"
+        },
+        "source": {
+          "commit": "beeb78840c3d45b9604a11fd9a06bf1be6a94b56",
+          "kind": "checkout",
+          "dirty": true
+        },
+        "version": "0.2.0",
+        "schema": "ctrlaer.install/v1",
+        "source_sha256": {
+          "ctrlaer_native": "c26c6187fe744fb133698f26ae04da3fffa9e79309682cd82e5bb762e07e06c2",
+          "ctrlaer_program": "2a5f159f6eacd316f7f753ffe7407fa4ac4ba825a7e772aaf947c717adec4b3e",
+          "ctrlaer": "679a72a3e4d7760984ea9f692dee1439f3e3ff734be68b42ed9eb6c1b7a0821a",
+          "ctrlaer_records": "5fc3b3ffe19b77cfa78f40f4e5cca0da4cd1653f4925724b896dd9ad74e634ec",
+          "ctrlaer_buffered": "eb70ea27dc29ae50610fbaee21f17fe8e55110feb97395bc19e71da0b0270a02",
+          "ctrlaer_runtime": "41c9a932e18d2e17a0ff8cf181a9ff5411f3a1fd0b0e3fc0e49d0a1419846cf6",
+          "ctrlaer_tools": "4b366930f5adb76199423e06caaf86745d54fd4f68a9b6cd29f848ddbcc8f576",
+          "ctrlaer_commands": "b17ceca47120ce50cfd20a254c658e51a53d4a00bc3e1cc9bba2503eb0005747",
+          "ctrlaer_stream": "f5f4f8f00e107ea96f334bbc9b8a2d86739ac9d566c154ba08df4e4474f02eb6",
+          "ctrlaer_capture": "48a3ac0c0727888b1390345ccce0064231d13fb783794d6b2235fcd042b8bf5e"
+        },
+        "firmware": {
+          "platform": "rp2",
+          "mpy": 7942,
+          "clock_hz": 150000000,
+          "board": "Pimoroni Pico Plus 2 (PSRAM + LTE + WiFi) with RP2350",
+          "firmware": "3.4.0; MicroPython cyw43-dynamic-pins, pico_plus2 v1.29.0-2 on 2026-08-31",
+          "version": [
+            1,
+            29,
+            0,
+            ""
+          ]
+        },
+        "modules": [
+          "ctrlaer",
+          "ctrlaer_commands",
+          "ctrlaer_program",
+          "ctrlaer_runtime",
+          "ctrlaer_capture",
+          "ctrlaer_tools",
+          "ctrlaer_records",
+          "ctrlaer_native",
+          "ctrlaer_stream",
+          "ctrlaer_buffered"
+        ]
+      },
+      "leds_off": true
+    }
+  },
+  "changes": [
+    "Keep long constant levels in single PIO packets instead of splitting them into 20 ms refill deadlines.",
+    "Record interrupts caught in timer/DMA callbacks so foreground wait raises them and stops output.",
+    "Disable every owned DMA channel and its interrupts before aborting any channel in its chain.",
+    "Clean up interrupted construction and waits, including captures and groups.",
+    "Bound and compact streaming gate metadata; evict history before appending to avoid doubling allocation at entry 129.",
+    "Preserve short float durations such as 0.01 ms at 100 kHz.",
+    "Decode signed clock-divider register reads correctly for slow digital capture."
+  ],
+  "interruptions": {
+    "tiny": {
+      "earlier_candidate_cycles": 60,
+      "final_build_cycles": 6,
+      "phases": [
+        "GATE",
+        "HIGH",
+        "LOW",
+        "PREPARE",
+        "REFILL",
+        "START"
+      ],
+      "one_interrupt_each": true,
+      "resources_reusable_each_time": true,
+      "soft_reset_after_each": true,
+      "thonny_helper_loaded": true
+    },
+    "pico": {
+      "earlier_candidate_cycles": 60,
+      "final_build_cycles": 6,
+      "phases": [
+        "GATE",
+        "HIGH",
+        "LOW",
+        "PREPARE",
+        "REFILL",
+        "START"
+      ],
+      "one_interrupt_each": true,
+      "resources_reusable_each_time": true,
+      "soft_reset_after_each": true,
+      "thonny_helper_loaded": true
+    }
+  },
+  "measured_levels_pico_final": [
+    {
+      "first_rise_samples": [
+        0,
+        0
+      ],
+      "sample_hz": 2000.0,
+      "refills": 6,
+      "max_width_error_us": 0,
+      "max_gc_us": 0,
+      "max_refill_us": 2193,
+      "triggers": 3,
+      "duration_ms": 800,
+      "pairs": 1
+    },
+    {
+      "first_rise_samples": [
+        0,
+        0
+      ],
+      "sample_hz": 2000.0,
+      "refills": 30,
+      "max_width_error_us": 0,
+      "max_gc_us": 17622,
+      "max_refill_us": 19499,
+      "triggers": 3,
+      "duration_ms": 800,
+      "pairs": 5
+    },
+    {
+      "first_rise_samples": [
+        0,
+        0
+      ],
+      "sample_hz": 2000.0,
+      "refills": 100,
+      "max_width_error_us": 0,
+      "max_gc_us": 13872,
+      "max_refill_us": 16252,
+      "triggers": 10,
+      "duration_ms": 80,
+      "pairs": 5
+    },
+    {
+      "first_rise_samples": [
+        0,
+        0
+      ],
+      "sample_hz": 8000.0,
+      "refills": 100,
+      "max_width_error_us": 0,
+      "max_gc_us": 13720,
+      "max_refill_us": 17370,
+      "triggers": 30,
+      "duration_ms": 8,
+      "pairs": 5
+    },
+    {
+      "first_rise_samples": [
+        0,
+        1
+      ],
+      "sample_hz": 80000.0,
+      "refills": 12,
+      "max_width_error_us": 0,
+      "max_gc_us": 17243,
+      "max_refill_us": 34141,
+      "triggers": 30,
+      "duration_ms": 0.8,
+      "pairs": 5
+    },
+    {
+      "first_rise_samples": [
+        8,
+        8
+      ],
+      "sample_hz": 800000.0,
+      "refills": 7,
+      "max_width_error_us": 0,
+      "max_gc_us": 0,
+      "max_refill_us": 28279,
+      "triggers": 30,
+      "duration_ms": 0.08,
+      "pairs": 5
+    },
+    {
+      "first_rise_samples": [
+        32,
+        33
+      ],
+      "sample_hz": 3200000.0,
+      "refills": 7,
+      "max_width_error_us": 0,
+      "max_gc_us": 0,
+      "max_refill_us": 28737,
+      "triggers": 30,
+      "duration_ms": 0.02,
+      "pairs": 5
+    },
+    {
+      "first_rise_samples": [
+        65,
+        66
+      ],
+      "sample_hz": 6400000.0,
+      "refills": 7,
+      "max_width_error_us": 0,
+      "max_gc_us": 0,
+      "max_refill_us": 29466,
+      "triggers": 30,
+      "duration_ms": 0.01,
+      "pairs": 5
+    }
+  ],
+  "measured_levels_tiny_preceding_candidate": [
+    {
+      "first_rise_samples": [
+        78,
+        79
+      ],
+      "sample_hz": 6400000.0,
+      "refills": 7,
+      "max_width_error_us": 0,
+      "max_gc_us": 0,
+      "max_refill_us": 45798,
+      "triggers": 30,
+      "duration_ms": 0.01,
+      "pairs": 5
+    }
+  ],
+  "hardware_trigger_count_tiny_final": [
+    {
+      "triggers": 200,
+      "max_refill_us": 68070,
+      "max_gc_us": 27772,
+      "output_rises": 1000,
+      "trigger_hz": 50,
+      "duration_us": 10
+    }
+  ],
+  "hardware_trigger_count_pico_preceding_candidate": [
+    {
+      "triggers": 200,
+      "max_refill_us": 33884,
+      "max_gc_us": 11233,
+      "output_rises": 1000,
+      "trigger_hz": 10,
+      "duration_us": 10
+    },
+    {
+      "triggers": 200,
+      "max_refill_us": 32733,
+      "max_gc_us": 10479,
+      "output_rises": 1000,
+      "trigger_hz": 50,
+      "duration_us": 10
+    },
+    {
+      "triggers": 200,
+      "max_refill_us": 31825,
+      "max_gc_us": 9075,
+      "output_rises": 1000,
+      "trigger_hz": 100,
+      "duration_us": 10
+    }
+  ],
+  "pico_continuous_preceding_candidate": {
+    "continuous_pulse": {
+      "gate_history": [],
+      "max_publish_us": 34,
+      "buffer_words": 4096,
+      "tx_dma_channels": 4,
+      "underrun": false,
+      "error": null,
+      "state": "aborted",
+      "max_gc_us": 8067,
+      "elapsed_us": 30175428,
+      "refill_count": 3185,
+      "history_limit": 128,
+      "retained_heap_bytes": 195488,
+      "gate": null,
+      "max_refill_us": 12231,
+      "buffer_count": 5,
+      "mode": "buffered",
+      "queued_events": 0,
+      "effect_history": [],
+      "wall_ms": 30198
+    },
+    "nonperiodic_chirp": {
+      "gate_history": [],
+      "max_publish_us": 35,
+      "buffer_words": 4096,
+      "tx_dma_channels": 4,
+      "underrun": false,
+      "error": null,
+      "state": "aborted",
+      "max_gc_us": 8417,
+      "elapsed_us": 30136317,
+      "refill_count": 3091,
+      "history_limit": 128,
+      "retained_heap_bytes": 203888,
+      "gate": null,
+      "max_refill_us": 13126,
+      "buffer_count": 5,
+      "mode": "buffered",
+      "queued_events": 0,
+      "effect_history": [],
+      "wall_ms": 30160
+    },
+    "nonperiodic_bursts": {
+      "gate_history": [],
+      "max_publish_us": 34,
+      "buffer_words": 4096,
+      "tx_dma_channels": 4,
+      "underrun": false,
+      "error": null,
+      "state": "aborted",
+      "max_gc_us": 8473,
+      "elapsed_us": 29999743,
+      "refill_count": 2250,
+      "history_limit": 128,
+      "retained_heap_bytes": 203984,
+      "gate": null,
+      "max_refill_us": 10382,
+      "buffer_count": 5,
+      "mode": "buffered",
+      "queued_events": 0,
+      "effect_history": [],
+      "wall_ms": 30024
+    },
+    "bursts": {
+      "gate_history": [],
+      "max_publish_us": 34,
+      "buffer_words": 4096,
+      "tx_dma_channels": 4,
+      "underrun": false,
+      "error": null,
+      "state": "aborted",
+      "max_gc_us": 8099,
+      "elapsed_us": 29999774,
+      "refill_count": 2250,
+      "history_limit": 128,
+      "retained_heap_bytes": 196016,
+      "gate": null,
+      "max_refill_us": 10028,
+      "buffer_count": 5,
+      "mode": "buffered",
+      "queued_events": 0,
+      "effect_history": [],
+      "wall_ms": 30023
+    },
+    "default_sweep": {
+      "gate_history": [],
+      "max_publish_us": 33,
+      "buffer_words": 4096,
+      "tx_dma_channels": 4,
+      "underrun": false,
+      "error": null,
+      "state": "aborted",
+      "max_gc_us": 8347,
+      "elapsed_us": 30145672,
+      "refill_count": 3092,
+      "history_limit": 128,
+      "retained_heap_bytes": 201024,
+      "gate": null,
+      "max_refill_us": 12608,
+      "buffer_count": 5,
+      "mode": "buffered",
+      "queued_events": 0,
+      "effect_history": [],
+      "wall_ms": 30169
+    },
+    "repeated_chirp": {
+      "gate_history": [],
+      "max_publish_us": 37,
+      "buffer_words": 4096,
+      "tx_dma_channels": 4,
+      "underrun": false,
+      "error": null,
+      "state": "aborted",
+      "max_gc_us": 8136,
+      "elapsed_us": 30049906,
+      "refill_count": 2253,
+      "history_limit": 128,
+      "retained_heap_bytes": 196800,
+      "gate": null,
+      "max_refill_us": 9831,
+      "buffer_count": 5,
+      "mode": "buffered",
+      "queued_events": 0,
+      "effect_history": [],
+      "wall_ms": 30072
+    },
+    "continuous_chirp": {
+      "gate_history": [],
+      "max_publish_us": 35,
+      "buffer_words": 4096,
+      "tx_dma_channels": 4,
+      "underrun": false,
+      "error": null,
+      "state": "aborted",
+      "max_gc_us": 8123,
+      "elapsed_us": 30126670,
+      "refill_count": 3090,
+      "history_limit": 128,
+      "retained_heap_bytes": 196416,
+      "gate": null,
+      "max_refill_us": 12380,
+      "buffer_count": 5,
+      "mode": "buffered",
+      "queued_events": 0,
+      "effect_history": [],
+      "wall_ms": 30149
+    }
+  },
+  "pico_lifecycle_preceding_candidate": {
+    "long_chirp": {
+      "buffer_count": 5,
+      "tx_dma_channels": 4,
+      "error": null,
+      "gate_history": [],
+      "gate": null,
+      "underrun": false,
+      "state": "done",
+      "max_gc_us": 0,
+      "elapsed_us": 100544,
+      "effect_history": [],
+      "max_refill_us": 5071,
+      "mode": "buffered",
+      "refill_count": 6,
+      "max_publish_us": 36,
+      "buffer_words": 4096,
+      "queued_events": 0,
+      "history_limit": 128
+    },
+    "cold_prepare_start_us": 376946,
+    "scratch_outside_dma_rings": "passed",
+    "infinite": {
+      "buffer_count": 5,
+      "tx_dma_channels": 4,
+      "error": null,
+      "gate_history": [],
+      "gate": null,
+      "underrun": false,
+      "state": "running",
+      "max_gc_us": 8224,
+      "elapsed_us": 1278928,
+      "effect_history": [],
+      "max_refill_us": 10184,
+      "mode": "buffered",
+      "refill_count": 96,
+      "max_publish_us": 35,
+      "buffer_words": 4096,
+      "queued_events": 0,
+      "history_limit": 128
+    },
+    "triggered": {
+      "gate_history": [
+        {
+          "entering": true,
+          "observed_elapsed_us": 2124,
+          "gate": 0
+        },
+        {
+          "entering": false,
+          "observed_elapsed_us": 175504,
+          "gate": 0
+        },
+        {
+          "entering": true,
+          "observed_elapsed_us": 177221,
+          "gate": 1
+        },
+        {
+          "entering": false,
+          "observed_elapsed_us": 182036,
+          "gate": 1
+        },
+        {
+          "entering": true,
+          "observed_elapsed_us": 184029,
+          "gate": 2
+        },
+        {
+          "entering": false,
+          "observed_elapsed_us": 188034,
+          "gate": 2
+        },
+        {
+          "entering": true,
+          "observed_elapsed_us": 190031,
+          "gate": 3
+        },
+        {
+          "entering": false,
+          "observed_elapsed_us": 194045,
+          "gate": 3
+        },
+        {
+          "entering": true,
+          "observed_elapsed_us": 194045,
+          "gate": 4
+        },
+        {
+          "entering": false,
+          "observed_elapsed_us": 212790,
+          "gate": 4
+        },
+        {
+          "entering": true,
+          "observed_elapsed_us": 214353,
+          "gate": 5
+        },
+        {
+          "entering": false,
+          "observed_elapsed_us": 218808,
+          "gate": 5
+        },
+        {
+          "entering": true,
+          "observed_elapsed_us": 220431,
+          "gate": 6
+        },
+        {
+          "entering": false,
+          "observed_elapsed_us": 224276,
+          "gate": 6
+        },
+        {
+          "entering": true,
+          "observed_elapsed_us": 225909,
+          "gate": 7
+        },
+        {
+          "entering": false,
+          "observed_elapsed_us": 231330,
+          "gate": 7
+        },
+        {
+          "entering": true,
+          "observed_elapsed_us": 231330,
+          "gate": 8
+        },
+        {
+          "entering": false,
+          "observed_elapsed_us": 251789,
+          "gate": 8
+        },
+        {
+          "entering": true,
+          "observed_elapsed_us": 253733,
+          "gate": 9
+        },
+        {
+          "entering": false,
+          "observed_elapsed_us": 258376,
+          "gate": 9
+        },
+        {
+          "entering": true,
+          "observed_elapsed_us": 260323,
+          "gate": 10
+        },
+        {
+          "entering": false,
+          "observed_elapsed_us": 265846,
+          "gate": 10
+        },
+        {
+          "entering": true,
+          "observed_elapsed_us": 267844,
+          "gate": 11
+        },
+        {
+          "entering": false,
+          "observed_elapsed_us": 272665,
+          "gate": 11
+        },
+        {
+          "entering": true,
+          "observed_elapsed_us": 272665,
+          "gate": 12
+        }
+      ],
+      "max_publish_us": 37,
+      "buffer_words": 4096,
+      "tx_dma_channels": 4,
+      "underrun": false,
+      "error": null,
+      "state": "waiting",
+      "max_gc_us": 0,
+      "elapsed_us": 512238,
+      "refill_count": 3,
+      "history_limit": 128,
+      "heap_growth_bytes": 1264,
+      "gate": 12,
+      "max_refill_us": 19092,
+      "buffer_count": 5,
+      "mode": "buffered",
+      "queued_events": 39,
+      "effect_history": []
+    },
+    "underrun": "passed",
+    "timeout": "passed",
+    "completion_abort_race": "passed"
+  },
+  "fixture": {
+    "tiny": {
+      "trigger_source_gpio": 2,
+      "trigger_input_gpio": 6,
+      "output_gpio": 18
+    },
+    "pico": {
+      "trigger_source_gpio": 1,
+      "trigger_input_gpio": 8,
+      "output_gpio": 18
+    },
+    "measurement": "A second PIO block samples output or independently counts its rising edges. Local GPIO jumpers carry the trigger."
+  },
+  "limits": [
+    "The exact reported 800 ms underrun was not reproduced from a clean start before the fix. Interrupt swallowing and memory failures were reproduced.",
+    "RP2040: the final candidate passed 200 triggers at 50 Hz, with five 10 us HIGH/LOW pairs per trigger. The same workload at 100 Hz missed a refill deadline.",
+    "These rates describe the tested generator and Python workload, not a universal maximum or guarantee.",
+    "Waveform sampling uses the same microcontroller clock as output, so it verifies scheduling relative to that clock, not absolute oscillator accuracy.",
+    "Earlier and final-candidate runs are identified separately. The last changes compact private gate metadata and fix bounded history growth; dense square-wave generation is unchanged.",
+    "Restart checks exercise USB Ctrl-C and Thonny raw-REPL reset protocol with its installed helper code; they do not automate a literal F5 keypress."
+  ],
+  "host_checks": {
+    "unit_tests_passed": 95,
+    "api_generation_check": true,
+    "mkdocs_strict_build": true,
+    "git_diff_check": true
+  },
+  "test_source_sha256": {
+    "tests/hardware/triggered_levels.py": "dec393176fe019724fd45a3153c6888c3b85f2cb7649eaa5dd929ed6a9a95e06",
+    "tests/hardware/trigger_rate.py": "fdf414cf02d12faae614b1737536c824ae8b522dcb03fac5069d1da8ca66d39b",
+    "tests/hardware/buffered.py": "45188b41f0190406f49f429c6d559c2942bd3e142cea0b73e3cb426e11dfe469",
+    "tests/hardware/buffered_stress.py": "9986b040a15d2fcac0356a779888819e2a9b297121432c80b79149d71cfcff27",
+    "tools/check_interrupts.py": "52ce3d3b95498dcc15ffe14c99fc9e766bc1e55263cb15eccdd8c485b343a7b4"
+  },
+  "references": {
+    "micropython_dma_implementation": "https://github.com/micropython/micropython/blob/v1.29.0/ports/rp2/rp2_dma.c",
+    "pico_sdk_dma_abort_documentation": "https://github.com/raspberrypi/pico-sdk/blob/master/src/rp2_common/hardware_dma/include/hardware/dma.h"
+  }
+}

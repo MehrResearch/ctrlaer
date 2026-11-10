@@ -1,165 +1,148 @@
-# Triggers, gates and coordinated waveforms
+# Start an experiment from an external signal
 
-All examples use the existing generator protocol. No separate declarative
-experiment language or builder is needed.
+A trigger is an electrical signal that tells an experiment when to start. For
+example, a camera may signal that it is ready, or a detector may signal that a
+sample has arrived. A gate is a wait inside the experiment: the outputs reach
+that point, then wait for another input before continuing.
 
-## Hardware inputs
+Connect the trigger source to GP6 and connect its ground to Pico GND. GP6 is
+physical pin 9 on a standard Pico; use a 3.3 V logic signal. See the
+connections below.
 
-Connect a 3.3 V trigger source to GP6 and common GND; GP0 is the drive
-output. See the [physical wiring guide](wiring.md#trigger-an-experiment).
+![Instrument trigger output to Pico GP6, with shared ground](assets/pico-trigger.svg)
+
+To use a button instead, connect a normally open button between **3V3(OUT)
+(pin 36)** and **GP6 (pin 9)**. The input pull-down in the code keeps GP6 LOW
+when the button is open. This is an alternative to the instrument connection.
+
+![Button connects GP6 to the Pico's 3.3 V output](assets/pico-button.svg)
+
+A button can bounce. Use it to try the example by hand; use an electronic
+trigger when checking precise repeated timing.
+
+## Wait before starting
+
+This example waits up to five seconds for GP6 to change from LOW to HIGH, then
+produces a 2 ms square wave on GP0.
 
 ```python
-from ctrlaer import CtrlAer, ON, OFF, Trigger, wait_for
+from ctrlaer import CtrlAer, ON, OFF, Trigger
 from machine import Pin
 
 Pin(6, Pin.IN, Pin.PULL_DOWN)
 
 def experiment():
-    yield ON, 20
-    yield OFF, 1
-    wait_for(6, level=1, timeout_ms=1000)
-    yield ON, 20
+    yield ON, 2
+    yield OFF, 8
 
-controller = CtrlAer(0, 0, 1)
+controller = CtrlAer(sm_number=0, base_pin=0, n_pins=1, freq=40_000)
 try:
-    run = controller.prepare(experiment(), trigger=Trigger(6, timeout_ms=5000))
-    run.start().wait(timeout_ms=10000)
+    run = controller.prepare(experiment(),
+                             trigger=Trigger(pin=6, timeout_ms=5000))
+    run.start().wait(timeout_ms=6000)
 finally:
     controller.close()
 ```
 
-An initial `Trigger` waits before the generator's first output command. `wait_for` adds
-a gate at a generator boundary. Rising-edge waits require LOW followed by HIGH;
-an already HIGH input is not a new rising edge. Falling waits do the reverse.
-Level waits release immediately if the requested level is already present.
-Configure external input pads before preparing. Another controller's output can
-also be observed without changing its GPIO direction.
+`start()` makes the experiment ready; it does not bypass the trigger. The Pico's
+PIO hardware watches the input, so a busy Python interpreter does not have
+to notice the edge before output can begin. Control instructions add a short
+fixed delay between the input and output; at 125 MHz, the three instructions
+after the wait take 12.288 µs, plus input synchronisation.
 
-WAIT instructions execute in PIO. Their output response does not depend on Python
-polling. Marker packets identify active gates and add fixed reported overhead.
-Unknown external waiting time is additional. Gates hold the last digital levels;
-explicitly yield OFF before waiting when that is the intended output.
+## Wait again for each repetition
 
-Timeouts are supervised by the runtime's soft timer. The timeout starts when its
-entry marker is serviced, so notification/abort includes timer and interpreter
-latency. `GateTimeoutError` identifies the failed gate and drives `final_mask`.
-`None` allows an unbounded wait. `gate_history` contains service-observed times;
-use digital capture for hardware-sampled transition timestamps.
-
-## Retriggering
+Use `wait_for()` inside the function when each repetition needs a new signal.
+The following experiment can continue until you interrupt it:
 
 ```python
-from ctrlaer import CtrlAer, pulse, OFF, wait_for
+from ctrlaer import CtrlAer, square_wave, OFF, wait_for
 from machine import Pin
 
 Pin(6, Pin.IN, Pin.PULL_DOWN)
 
-def shots(n_shots=10):
-    for _ in range(n_shots):
-        wait_for(6, timeout_ms=5000)
-        yield pulse(108050), 20
-        yield OFF, 100
+def shots():
+    while True:
+        wait_for(pin=6)
+        yield square_wave(freq=40_000), 2
+        yield OFF, 8
 
-controller = CtrlAer(0, 0, 1)
+controller = CtrlAer(sm_number=0, base_pin=0, n_pins=1)
 try:
     run = controller.prepare(shots, mode="buffered")
-    run.start().wait(timeout_ms=60000)
+    run.start().wait()
 finally:
     controller.close()
 ```
 
-Ten shots can exceed a Tiny's finite waveform budget. Buffered mode retains
-bounded lookahead while preserving the hardware gate before every burst.
+The output waits at its last level, so the `OFF` instruction makes sure GP0 is
+LOW between repetitions. Pulses that arrive during output or the eight-millisecond
+pause are ignored. The next wait must first see LOW, then a new HIGH.
 
-![Two nominal iterations of this shot pattern](assets/triggered.svg)
+For a fixed number of repetitions, replace `while True` with
+`for _ in range(10)`. A completed or aborted run can also be restarted with
+`run.rearm()` followed by `run.start()`.
 
-The next input edge must arrive after the next gate is ready to observe LOW/HIGH;
-edges during an active pulse are not queued. Completed or aborted open runs can
-also be explicitly `rearm()`ed.
-See the [triggered-shot gallery](examples.md#wait-for-another-trigger-on-every-shot)
-for a complete indefinite example and its nominal waveform plot.
+## Choose what counts as a trigger
 
-## Independent waveform groups
+| Request | Meaning |
+|---|---|
+| `wait_for(pin=6)` | Wait for LOW followed by HIGH |
+| `wait_for(pin=6, edge="falling")` | Wait for HIGH followed by LOW |
+| `wait_for(pin=6, level=1)` | Continue when HIGH, including if it is already HIGH |
+| `wait_for(pin=6, level=0)` | Continue when LOW, including if it is already LOW |
 
-```python
-from ctrlaer import CtrlAer, Group, pulse
+`Trigger` accepts the same options. By default there is no time limit. A
+`timeout_ms` causes a `GateTimeoutError` if the input does not arrive, and the
+outputs are set to `final_mask` (LOW by default). Python supervises this timeout,
+so a long Python operation can delay it. Use the timeout to detect a failed
+experiment; it is not an independent hardware cutoff.
 
-def atomiser_a():
-    yield pulse(108050), 20
+## Coordinate channels with `mux()`
 
-def atomiser_b():
-    yield pulse(111500, duty=0.4, phase=0.25), 20
+For most experiments with several outputs, use `mux()`. It combines one function
+per channel into a single schedule, sharing one PIO state machine. A wait in any
+channel pauses that whole schedule. This is useful when all devices should
+wait together for a sample to arrive.
 
-a, b = CtrlAer(0, 0, 1), CtrlAer(1, 1, 1)
-group = Group([a.prepare(atomiser_a()), b.prepare(atomiser_b())])
-try:
-    group.start().wait(timeout_ms=1000)
-finally:
-    group.close()
-```
+The [multi-device examples](examples.md) show lights, camera triggers and square
+waves combined this way.
 
-The first 50 µs of each independently compiled member use the same time axis:
+## Let one channel wait independently with `Group`
 
-![Group member A: 108.05 kHz, 50% duty on GP0](assets/group-a.svg)
-
-![Group member B: 111.5 kHz, 40% duty, quarter-cycle phase on GP1](assets/group-b.svg)
-
-Connect GP0 and GP1 to separate driver logic inputs and common GND. They are
-physical positions 16/15 on the Tiny and 1/2 on the Pico Plus 2; see
-[wiring](wiring.md). Group timing permits edge crossings that a single merged
-engine could not represent.
-
-One atomic enable/divider-reset write starts all group members in one PIO block.
-Each has an independent schedule/frequency and its own final mask. A member error
-aborts other active members. RP2350 can also start members across all three PIO
-blocks atomically using its neighbour-control registers. On RP2040, cross-block
-groups need the same initial hardware trigger: arm the group first, then provide
-the common external edge. RP2040 cross-block groups without that trigger fail.
-
-Multiple carriers can also share one `mux`. Their merged edges must fit the
-six-tick minimum interval. Separate grouped state machines allow independent
-carriers whose edges would otherwise approach too closely.
-
-## Duty cycle, phase and complementary dead time
+Use `Group` when channels need separate waits or when independently timed square
+waves have output changes too close together for one PIO state machine. Each member
+uses a separate controller and more hardware resources. Starting the group
+starts its members together; it does not combine their instructions.
 
 ```python
-from ctrlaer import pulse, mux
+from ctrlaer import CtrlAer, Group, square_wave
 
 def drive_a():
-    yield pulse(108050, duty=0.5, dead_time_ns=200), 20
+    yield square_wave(freq=40_000), 2
 
 def drive_b():
-    yield pulse(108050, duty=0.5, complement=True, dead_time_ns=200), 20
+    yield square_wave(freq=41_000, duty=0.4), 2
 
-program = mux([drive_a(), drive_b()])
+a = CtrlAer(sm_number=0, base_pin=0, n_pins=1)
+b = CtrlAer(sm_number=1, base_pin=1, n_pins=1)
+try:
+    group = Group([a.prepare(drive_a()), b.prepare(drive_b())])
+    group.start().wait(timeout_ms=1000)
+finally:
+    a.close()
+    b.close()
 ```
 
-`phase` delays the first ideal rising edge by a fraction of a carrier cycle, in
-[0, 1). `duty` is strictly between 0 and 1. A complementary partner uses the same
-options and `complement=True`. Both turn off at their ideal falling edges and turn
-on after the specified dead time; both are LOW during the gap. Invalid duty,
-phase, dead time and unrepresentably short intervals fail during preparation.
+GP0 and GP1 connect to the two driver inputs. PIO state machines 0 and 1 are in the
+same PIO block and start in one hardware operation. An error in one member stops
+the others. On RP2040, members in different PIO blocks need a common initial
+hardware trigger; start the group first, then send that trigger. RP2350 can also
+start members across its PIO blocks together without an external trigger.
 
-## Repeated adiabatic sweeps
+## Adjust a square wave or sweep its frequency
 
-```python
-from ctrlaer import chirp, OFF
-
-def adiabatic(pulse_ms=20, sweep_ms=2):
-    yield chirp(90000, 120000, sweep_ms=sweep_ms), pulse_ms
-    yield OFF, 100
-```
-
-`sweep_ms` is one traversal from the first frequency to the second. An equal-time
-return traversal follows, producing a triangle in frequency. The default is a
-20 ms one-way traversal. Sweep rate is independent of pulse duration: the example
-spends 2 ms going up, 2 ms going down, and repeats for the whole 20 ms ON section.
-A shorter pulse clips that same frequency trajectory; it does not rescale it.
-
-![Five frequency triangles during a 20 ms ON section](assets/chirp-frequency.svg)
-
-Edges come from the integral of the piecewise-linear frequency, preserving phase
-through reversals and `mux` boundaries. Playback uses DMA rather than CPU-timed
-divider writes. The example contains 2100 cycles in five complete triangles.
-Reusing a chirp command in a new yielded ON section starts a fresh sweep. This
-defines the electrical drive; atomiser response still needs lab evaluation.
+The [signal examples](examples.md) explain duty cycle, complementary outputs,
+dead time and repeated frequency sweeps, with code and diagrams. These describe
+the output signal. The response of the attached light, motor or transducer must
+be checked with that device.

@@ -11,7 +11,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from ctrlaer import compile_program, HIGH, OFF, pulse, chirp
+from ctrlaer import compile_program, HIGH, OFF, square_wave, sweep
 from ctrlaer_capture import Trace
 from ctrlaer_records import save_record, fingerprint
 from ctrlaer_tools import program_to_dict, program_from_dict
@@ -24,11 +24,11 @@ WAVEFORM = """
 def experiment(chirp_ms=20,sweep_ms=2,start_hz=90000,stop_hz=120000):
     yield HIGH, .1
     yield OFF, .2
-    yield pulse(10000,duty=.25), 2
+    yield square_wave(10000,duty=.25), 2
     yield OFF, .3
-    yield pulse(108050,duty=.4,phase=.25), 2
+    yield square_wave(108050,duty=.4,phase=.25), 2
     yield OFF, .3
-    yield chirp(start_hz,stop_hz,sweep_ms=sweep_ms), chirp_ms
+    yield sweep(start_hz,stop_hz,sweep_ms=sweep_ms), chirp_ms
     yield OFF, .2
 """
 exec(WAVEFORM)
@@ -62,7 +62,7 @@ print(json.dumps({'board':sys.implementation._machine,'firmware':sys.version,'cl
 """
 
 PREPARE_TX = """
-from ctrlaer import CtrlAer,HIGH,OFF,pulse,chirp
+from ctrlaer import CtrlAer,HIGH,OFF,square_wave,sweep
 set_role('sender')
 """ + WAVEFORM + """
 controller=CtrlAer(0,link_pin,1,freq=100000)

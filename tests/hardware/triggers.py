@@ -1,5 +1,5 @@
 """PIO trigger/gate/retrigger checks using GP9 as an internal signal source."""
-from ctrlaer import CtrlAer, HIGH, LOW, pulse, wait_for, DigitalCapture, Trigger, Group
+from ctrlaer import CtrlAer, HIGH, LOW, square_wave, wait_for, DigitalCapture, Trigger, Group
 from ctrlaer_runtime import GateTimeoutError
 from machine import Pin
 import json, gc
@@ -11,9 +11,9 @@ results = {}
 try:
     def p():
         wait_for(9,timeout_ms=50)
-        yield pulse(100000),.5
+        yield square_wave(100000),.5
         wait_for(9,edge='falling',timeout_ms=50)
-        yield pulse(100000),.5
+        yield square_wave(100000),.5
     run = output.prepare(p)
     signal = source.prepare([(LOW,5),(HIGH,1),(LOW,2)])
     capture = DigitalCapture(4, 8, 2, sample_hz=25000000, duration_ms=3,
@@ -35,7 +35,7 @@ try:
     def p():
         for _ in range(2):
             wait_for(9,timeout_ms=50)
-            yield pulse(100000),.1
+            yield square_wave(100000),.1
     run = output.prepare(p)
     signal = source.prepare([(LOW,3),(HIGH,.25),(LOW,3),(HIGH,.25),(LOW,1)])
     capture = DigitalCapture(4, 8, 1, sample_hz=1000000, duration_ms=20)
@@ -52,7 +52,7 @@ try:
     Pin(9, Pin.OUT, value=1)
 
     # A high level does not count as a new rising edge.
-    run = output.prepare([(pulse(100000),.1)], trigger=Trigger(9, timeout_ms=5))
+    run = output.prepare([(square_wave(100000),.1)], trigger=Trigger(9, timeout_ms=5))
     try:
         run.start().wait(100)
         raise AssertionError('rising-edge trigger accepted an already high input')

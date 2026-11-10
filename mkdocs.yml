@@ -1,6 +1,6 @@
 site_name: CtrlAer documentation
 site_url: https://mehrresearch.github.io/ctrlaer/
-site_description: Precisely timed generator programs on MicroPython RP2040 and RP2350 boards
+site_description: Control the timing of laboratory equipment with RP2040/RP2350 microcontrollers
 theme:
   name: material
   palette:
@@ -25,6 +25,7 @@ theme:
     - search.suggest
     - search.highlight
     - content.code.copy
+    - content.tabs.link
 
 repo_url: https://github.com/MehrResearch/ctrlaer
 repo_name: MehrResearch/ctrlaer
@@ -35,6 +36,8 @@ markdown_extensions:
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
   - admonition
   - pymdownx.details
   - attr_list
@@ -42,16 +45,29 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Install and upgrade: installation.md
-  - Getting started: getting-started.md
-  - Pins and wiring: wiring.md
-  - Execution modes: execution-modes.md
-  - API reference: api-reference.md
-  - Examples: examples.md
-  - Original FIFO recipes: original-recipes.md
-  - Prepared execution: prepared-execution.md
-  - Triggers and waveform groups: triggers-and-groups.md
-  - Digital capture: digital-capture.md
-  - Analysis, scans and records: analysis-and-records.md
-  - Implementation and validation: capabilities-plan.md
-  - Performance: performance.md
+  - Start here:
+      - Install and upgrade: installation.md
+      - Getting started: getting-started.md
+      - Connect a Pico: wiring.md
+  - Build an experiment:
+      - Control several devices: examples.md
+      - External triggers: triggers-and-groups.md
+      - Run an experiment: execution-modes.md
+      - Prepare and replay: prepared-execution.md
+      - Measure a signal: digital-capture.md
+      - Previews and records: analysis-and-records.md
+      - More recipes: original-recipes.md
+  - Understand the timing:
+      - Timing and performance: performance.md
+      - How CtrlAer works: capabilities-plan.md
+  - API reference:
+      - Overview: api-reference.md
+      - Controllers: api/controller.md
+      - Signals and timing: api/signals.md
+      - Triggers and groups: api/triggers.md
+      - Run objects: api/runs.md
+      - Previews and programs: api/analysis.md
+      - Digital measurements: api/capture.md
+      - Experiment records: api/records.md
+      - Errors: api/errors.md
+  - Citing CtrlAer: citing.md

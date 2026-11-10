@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 198" role="img">
+<title>Expected output</title>
+<rect width="100%" height="100%" rx="10" fill="#fff"/>
+<g font-family="system-ui, sans-serif" fill="#243247">
+<text x="24" y="32" font-size="23.400000000000002" fill="#243247" font-weight="600" text-anchor="start">Expected output</text>
+<path d="M132.0,54 L132.0,146" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<text x="132.0" y="166" font-size="15.600000000000001" fill="#64748b" font-weight="400" text-anchor="middle">0</text>
+<path d="M299.6,54 L299.6,146" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<text x="299.6" y="166" font-size="15.600000000000001" fill="#64748b" font-weight="400" text-anchor="middle">2</text>
+<path d="M467.2,54 L467.2,146" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<text x="467.2" y="166" font-size="15.600000000000001" fill="#64748b" font-weight="400" text-anchor="middle">4</text>
+<path d="M634.8,54 L634.8,146" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<text x="634.8" y="166" font-size="15.600000000000001" fill="#64748b" font-weight="400" text-anchor="middle">6</text>
+<path d="M802.4,54 L802.4,146" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<text x="802.4" y="166" font-size="15.600000000000001" fill="#64748b" font-weight="400" text-anchor="middle">8</text>
+<path d="M970.0,54 L970.0,146" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<text x="970.0" y="166" font-size="15.600000000000001" fill="#64748b" font-weight="400" text-anchor="middle">10</text>
+<text x="551.0" y="189" font-size="16.900000000000002" fill="#243247" font-weight="400" text-anchor="middle">Time (ms)</text>
+<text x="20" y="83" font-size="18.2" fill="#243247" font-weight="600" text-anchor="start">GP0</text>
+<text x="120" y="67" font-size="13.0" fill="#64748b" font-weight="400" text-anchor="end">HIGH</text>
+<text x="120" y="103" font-size="13.0" fill="#64748b" font-weight="400" text-anchor="end">LOW</text>
+<path d="M132,63 L970,63" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<path d="M132,99 L970,99" fill="none" stroke="#e5eaf1" stroke-width="1"/>
+<path d="M 132,99 H 133.048 V 63 H 134.095 V 99 H 135.143 V 63 H 136.190 V 99 H 137.238 V 63 H 138.285 V 99 H 139.333 V 63 H 140.380 V 99 H 141.428 V 63 H 142.475 V 99 H 143.523 V 63 H 144.570 V 99 H 145.618 V 63 H 146.665 V 99 H 147.713 V 63 H 148.760 V 99 H 149.808 V 63 H 150.855 V 99 H 151.903 V 63 H 152.950 V 99 H 153.998 V 63 H 155.045 V 99 H 156.093 V 63 H 157.140 V 99 H 158.188 V 63 H 159.235 V 99 H 160.283 V 63 H 161.330 V 99 H 162.378 V 63 H 163.425 V 99 H 164.473 V 63 H 165.520 V 99 H 166.568 V 63 H 167.615 V 99 H 168.663 V 63 H 169.710 V 99 H 170.758 V 63 H 171.805 V 99 H 172.853 V 63 H 173.900 V 99 H 174.948 V 63 H 175.995 V 99 H 177.043 V 63 H 178.090 V 99 H 179.138 V 63 H 180.185 V 99 H 181.233 V 63 H 182.280 V 99 H 183.328 V 63 H 184.375 V 99 H 185.423 V 63 H 186.470 V 99 H 187.518 V 63 H 188.565 V 99 H 189.613 V 63 H 190.660 V 99 H 191.708 V 63 H 192.755 V 99 H 193.803 V 63 H 194.850 V 99 H 195.898 V 63 H 196.945 V 99 H 197.993 V 63 H 199.040 V 99 H 200.088 V 63 H 201.135 V 99 H 202.183 V 63 H 203.230 V 99 H 204.278 V 63 H 205.325 V 99 H 206.373 V 63 H 207.420 V 99 H 208.468 V 63 H 209.515 V 99 H 210.563 V 63 H 211.610 V 99 H 212.658 V 63 H 213.705 V 99 H 214.753 V 63 H 215.800 V 99 H 216.848 V 63 H 217.895 V 99 H 218.943 V 63 H 219.990 V 99 H 221.038 V 63 H 222.085 V 99 H 223.133 V 63 H 224.180 V 99 H 225.228 V 63 H 226.275 V 99 H 227.323 V 63 H 228.370 V 99 H 229.418 V 63 H 230.465 V 99 H 231.513 V 63 H 232.560 V 99 H 233.608 V 63 H 234.655 V 99 H 235.703 V 63 H 236.750 V 99 H 237.798 V 63 H 238.845 V 99 H 239.893 V 63 H 240.940 V 99 H 241.988 V 63 H 243.035 V 99 H 244.083 V 63 H 245.130 V 99 H 246.178 V 63 H 247.225 V 99 H 248.273 V 63 H 249.320 V 99 H 250.368 V 63 H 251.415 V 99 H 252.463 V 63 H 253.510 V 99 H 254.558 V 63 H 255.605 V 99 H 256.653 V 63 H 257.700 V 99 H 258.748 V 63 H 259.795 V 99 H 260.843 V 63 H 261.890 V 99 H 262.938 V 63 H 263.985 V 99 H 265.033 V 63 H 266.080 V 99 H 267.128 V 63 H 268.175 V 99 H 269.223 V 63 H 270.270 V 99 H 271.318 V 63 H 272.365 V 99 H 273.413 V 63 H 274.460 V 99 H 275.508 V 63 H 276.555 V 99 H 277.603 V 63 H 278.650 V 99 H 279.698 V 63 H 280.745 V 99 H 281.793 V 63 H 282.840 V 99 H 283.888 V 63 H 284.935 V 99 H 285.983 V 63 H 287.030 V 99 H 288.078 V 63 H 289.125 V 99 H 290.173 V 63 H 291.220 V 99 H 292.268 V 63 H 293.315 V 99 H 294.363 V 63 H 295.410 V 99 H 296.458 V 63 H 297.505 V 99 H 298.553 V 63 H 299.600 V 99 H 970" stroke="#355cbb" stroke-width="2" fill="none"/>
+</g></svg>

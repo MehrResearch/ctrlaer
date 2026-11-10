@@ -1,5 +1,5 @@
 """Resource/fault isolation and finite capture reuse on idle GP8/GP9."""
-from ctrlaer import CtrlAer,HIGH,LOW,pulse,compile_program,DigitalCapture,Trigger,Group
+from ctrlaer import CtrlAer,HIGH,LOW,square_wave,compile_program,DigitalCapture,Trigger,Group
 from ctrlaer_runtime import UnderrunError,ExecutionTimeoutError
 from ctrlaer_capture import CaptureOverrunError
 from machine import Pin,freq
@@ -22,7 +22,7 @@ try:
     result['ownership_conflicts_rejected']=True
     # Keep this peer active beyond ordinary interpreter/abort-cleanup latency.
     ra=a.prepare([(HIGH,200)])
-    rb=b.prepare([(pulse(40000),20)])
+    rb=b.prepare([(square_wave(40000),20)])
     rb._tx.active(0)
     group=Group([ra,rb])
     group.start()
@@ -60,7 +60,7 @@ try:
         assert capture.state=='error' and capture.trace.metadata['overrun']
     capture.close();capture=None
     result['injected_capture_overrun']=True
-    ra=a.prepare([(pulse(100000),.5)])
+    ra=a.prepare([(square_wave(100000),.5)])
     capture=DigitalCapture(4,8,sample_hz=1000000,duration_ms=1,trigger=Trigger(8))
     for index in range(2):
         if index:

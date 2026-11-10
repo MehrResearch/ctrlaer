@@ -254,6 +254,12 @@ _programs = {}
 _users = {}
 
 
+def _sample_rate(clock_hz, divider):
+    # machine.mem32 reads signed values. Dividers >= 32768 have bit 31 set.
+    fixed = (((divider >> 16) & 0xffff) or 65536) * 256 + ((divider >> 8) & 255)
+    return clock_hz * 128 / fixed
+
+
 def _sampler(n_pins, trigger):
     from rp2 import PIO, asm_pio
     levels = () if trigger is None else trigger.levels()
@@ -277,29 +283,35 @@ def _sampler(n_pins, trigger):
 
 
 class DigitalCapture:
-    """Finite PIO/DMA capture, optionally starting on a GPIO trigger.
+    """Record digital levels at regular intervals using the Pico's PIO hardware.
 
-    Input pads must have their input buffer enabled (Pin.IN or a live output).
-    Capturing an output does not change its GPIO function or direction.
+    It can observe an existing output on the same Pico or an external input.
+    Capturing a pin does not change its GPIO function or direction. Configure
+    external signals as inputs with `machine.Pin` first.
 
-    `sm_number` is a free global PIO state-machine index; `base_pin` is GPIO0–29
-    for channel 0, followed by `n_pins` contiguous inputs (1–16). Supply exactly
-    one of `samples` (positive integer) or `duration_ms` (positive milliseconds).
-    `sample_hz` defaults to 10 MHz and must fit a two-clock sampler's divider:
-    system clock / (2 * 65536) through system clock / 2. The achieved rate is
-    reported in `sample_hz`; it can differ slightly from the requested rate.
+    Args:
+        sm_number (int): Free PIO state-machine number: 0–7 on RP2040, 0–11 on RP2350.
+            Use a different state machine from the output controller.
+        base_pin (int): GPIO number of the first input, from 0 to 29.
+        n_pins (int): Number of consecutive input pins, from 1 to 16. The last pin
+            must not exceed GPIO29. Defaults to one channel.
+        sample_hz (float): Samples per second, default 10 million. The supported
+            range is system clock / 131072 through system clock / 2. The actual
+            rate is reported and may differ slightly from the request.
+        samples (int or None): Number of samples to record. Supply this or
+            `duration_ms`, but not both.
+        duration_ms (float or None): Recording duration in milliseconds, as an
+            alternative to a sample count.
+        trigger (Trigger or None): Input change or level to wait for before sampling.
+            Its own `timeout_ms` is unused here; set `capture.wait(timeout_ms=...)`
+            for an overall deadline, including time waiting for the trigger.
+        names (sequence or None): One label per input channel.
+        max_bytes (int): Maximum packed sample-buffer size, default 65536 (64 KiB).
 
-    `trigger` optionally supplies a `Trigger` pin/edge/level before sampling.
-    Its per-gate `timeout_ms` is not used for capture: set the overall deadline
-    in `wait()`, which includes waiting for the trigger. Sample zero is the first
-    sampled value after the PIO wait, with normal GPIO synchroniser latency.
-
-    `names` supplies one channel label. `max_bytes` bounds the packed allocation
-    (default 65536). One state machine and one DMA channel are claimed. Oversized
-    buffers/invalid options raise `ValueError`; resource allocation can fail.
-    Construction arms an inactive capture; call `start()`, then `wait()` for a
-    `Trace`. Supports `with` for closing on exit. Captures are finite; partial
-    abort data counts only complete DMA words.
+    Construction reserves one PIO state machine, one DMA channel and the sample buffer.
+    Call `start()` before producing the signal, then `wait()` to obtain a `Trace`.
+    Invalid options or an oversized buffer raise `ValueError`; allocating hardware
+    or memory can also fail. A `with` block closes the capture on exit.
     """
     def __init__(self, sm_number, base_pin, n_pins=1, sample_hz=10000000,
                  samples=None, duration_ms=None, trigger=None, names=None, max_bytes=65536):
@@ -335,19 +347,18 @@ class DigitalCapture:
         self.trace = None
         self._key, self._program = _sampler(n_pins, trigger)
         self._user_key = (sm_number // 4, self._key)
-        claim(self, sm_number)
         try:
+            claim(self, sm_number)
             self.sm = StateMachine(sm_number, self._program, freq=int(2 * sample_hz), in_base=Pin(base_pin))
             self.sm.irq(handler=None)
-            self._registered = True
             _users[self._user_key] = _users.get(self._user_key, 0) + 1
+            self._registered = True
             address = 0x502000c8 + (sm_number // 4) * 0x100000 + (sm_number % 4) * 24
             divider = mem32[address]
-            fixed = ((divider >> 16) or 65536) * 256 + ((divider >> 8) & 255)
-            self.sample_hz = freq() * 128 / fixed
+            self.sample_hz = _sample_rate(freq(), divider)
             self.clock_hz = freq()
             self.arm()
-        except Exception:
+        except BaseException:
             self.close()
             raise
 
@@ -360,14 +371,15 @@ class DigitalCapture:
         """
         from machine import Pin, freq, mem32
         from rp2 import DMA
+        from ctrlaer_runtime import _close_dma
         if self.closed or self.state == "running":
             raise RuntimeError("capture must be inactive and open")
         if freq() != self.clock_hz:
             raise RuntimeError("system clock changed; create a new capture")
         self.sm.active(0)
         if self._dma is not None:
-            self._dma.active(0)
-            self._dma.close()
+            _close_dma((self._dma,))
+            self._dma = None
         self.sm.init(self._program, freq=int(2 * self.sample_hz), in_base=Pin(self.base_pin))
         base = 0x50200000 + (self.sm_id // 4) * 0x100000
         bit = 1 << (self.sm_id % 4)
@@ -405,16 +417,17 @@ class DigitalCapture:
             raise RuntimeError("capture must be prepared before starting")
         if freq() != self.clock_hz:
             raise RuntimeError("system clock changed after capture preparation")
-        enable_mask(self.sm_id // 4, 1 << (self.sm_id % 4))
         self.state = "running"
+        enable_mask(self.sm_id // 4, 1 << (self.sm_id % 4))
         return self
 
     def _finish(self, complete):
+        from ctrlaer_runtime import _disable_dma
         if self._dma is None:
             return
         self.sm.active(0)
+        _disable_dma(1 << self._dma.channel)
         remaining = self._dma.count
-        self._dma.active(0)
         self._dma.close()
         self._dma = None
         samples = self.samples if complete else min(self.samples, (len(self.words) - remaining) * (32 // self.n_pins))
@@ -466,13 +479,17 @@ class DigitalCapture:
         if timeout_ms is not None:
             number(timeout_ms, "capture timeout", strict=True)
         start = ticks_ms()
-        while self.poll() == "running":
-            if timeout_ms is not None and ticks_diff(ticks_ms(), start) >= timeout_ms:
-                self.abort()
-                raise ExecutionTimeoutError("capture timed out")
-            sleep_ms(1)
-        if self.error is not None:
-            raise self.error
+        try:
+            while self.poll() == "running":
+                if timeout_ms is not None and ticks_diff(ticks_ms(), start) >= timeout_ms:
+                    self.abort()
+                    raise ExecutionTimeoutError("capture timed out")
+                sleep_ms(1)
+            if self.error is not None:
+                raise self.error
+        except BaseException:
+            self.abort()
+            raise
         return self.trace
 
     def abort(self):
@@ -493,10 +510,15 @@ class DigitalCapture:
         export after closing. A closed capture cannot be armed again.
         """
         from rp2 import PIO
-        from ctrlaer_runtime import release
+        from ctrlaer_runtime import release, _close_dma
         if self.closed:
             return
         self.abort()
+        if self.sm is not None:
+            self.sm.active(0)
+        if self._dma is not None:
+            _close_dma((self._dma,))
+            self._dma = None
         if self._registered:
             _users[self._user_key] -= 1
             if not _users[self._user_key]:

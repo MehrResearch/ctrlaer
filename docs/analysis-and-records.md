@@ -1,51 +1,90 @@
-# Generator analysis, scans and records
+# Preview an experiment and save its results
 
-Analysis runs the same generator API as execution. It interprets CtrlAer-owned
-effects and compiles exact output edges; it does not provide a second authoring
-language. Ordinary Python side effects still happen.
+A preview helps you check a sequence before connecting equipment: which output
+starts first, how long it stays on, and whether the pauses are where you expect.
+You can make previews on your computer without a Pico. CtrlAer reads the same
+experiment function that you would run on the board.
+
+## Draw a waveform
+
+This function sweeps a square wave between 90 and 120 kHz for 20 ms, then pauses
+for 100 ms. Each journey between the two frequencies takes 2 ms, so the active
+part contains five complete up-and-down sweeps.
 
 ```python
-from ctrlaer import chirp, OFF, print, compile_program
-from ctrlaer_tools import render_svg, parameter_scan
+from ctrlaer import sweep, OFF, compile_program
+from ctrlaer_tools import render_svg
 
-def experiment(pulse_ms=20, sweep_ms=2):
-    print("shot", pulse_ms, sweep_ms)
-    yield chirp(90000, 120000, sweep_ms=sweep_ms), pulse_ms
+def experiment(duration_ms=20, sweep_ms=2):
+    yield sweep(90_000, 120_000, sweep_ms=sweep_ms), duration_ms
     yield OFF, 100
 
-program = compile_program(experiment,
-                          parameters={"pulse_ms": 20, "sweep_ms": 2})
+program = compile_program(experiment, clock_hz=125_000_000)
 print(program.summary())
 with open("preview.svg", "w") as stream:
     stream.write(render_svg(program))
 ```
 
-The [sweep example](examples.md#sweep-repeatedly-within-one-pulse) shows the same
-ON/rest waveform and its frequency trajectory. This analysis code runs on
-desktop Python with no physical connections. On a board, save large previews or
-records after playback stops; file I/O shares the interpreter with production.
+Open `preview.svg` in a browser. To see the individual HIGH and LOW intervals,
+use `render_svg(program, window_ms=0.1)` to display the first 100 µs. A dense
+waveform viewed over its whole duration looks like a solid band.
 
-The summary includes channel names, pulse counts, nominal duration, requested
-duration, duration/edge quantisation, control overhead, effect annotations, gates
-and buffer size. An infinite generator needs `window_ms`; size/complexity guards
-raise errors when exceeded. `render_svg` consumes the compiled buffer without
-advancing the generator again. Limit its view/edge count for dense waveforms.
+The summary reports the duration, number of rising edges on each channel and
+required memory. It also reports timing changes caused by rounding to the
+Pico's clock. Pass the board's `machine.freq()` as `clock_hz` when you intend
+to run exactly the program you previewed.
+
+An input wait has no known duration until the input arrives. Previews mark its
+position in the sequence and show the output without adding an imaginary wait.
+For a function that loops forever, set `window_ms` in `compile_program()`.
+
+## Preview a repeating experiment
+
+You do not need to run a repeating function to its end to preview it. For
+example, reuse the cycle above in a loop and calculate its first 350 ms:
 
 ```python
-for index, parameters, compiled in parameter_scan(
-        experiment,
-        {"pulse_ms": [10, 20, 40], "sweep_ms": [1, 2, 5]}):
-    # Each trial calls experiment(**parameters) to obtain a fresh generator.
-    print(index, parameters, compiled.pulse_counts)
+def repeating_experiment():
+    while True:
+        yield from experiment()
+
+program = compile_program(repeating_experiment, window_ms=350,
+                          clock_hz=125_000_000)
+with open("repeating-preview.svg", "w") as stream:
+    stream.write(render_svg(program))
 ```
 
-Axes are enumerated in sorted-name order, preserving the supplied value order.
-`fixed` supplies other ordinary keyword arguments. `max_trials` prevents accidental
-combinatorial explosion. Reproducibility of arbitrary global state/randomness
-remains the caller's responsibility; saving exact compiled buffers preserves what
-was actually prepared even when Python state is dynamic.
+`window_ms` is the duration shown in the preview, not a delay while calculating
+it. The function stops being read when the window is filled. This produces a
+reference for that part of the experiment; it does not limit how long a buffered
+run can continue on the Pico.
 
-## Desktop command line
+## Compare settings
+
+`parameter_scan()` creates a preview for every combination of settings. It does
+not run the physical experiments. This example compares three output durations
+and three sweep speeds, producing nine programs:
+
+```python
+from ctrlaer_tools import parameter_scan
+
+for index, settings, program in parameter_scan(
+        experiment,
+        {"duration_ms": [10, 20, 40], "sweep_ms": [1, 2, 5]},
+        clock_hz=125_000_000):
+    with open("preview-{}.svg".format(index), "w") as stream:
+        stream.write(render_svg(program))
+    print(index, settings, program.duration_ms)
+```
+
+Each combination calls the function again with those arguments. Ordinary Python
+operations in the function still happen, including changes to global variables,
+sensor reads and file writes. Keep that in mind when previewing a function that
+also interacts with equipment.
+
+## Work from the command line
+
+The checkout includes an example function and a parameter grid:
 
 ```sh
 python -m ctrlaer_tools preview examples/adiabatic.py:experiment \
@@ -54,38 +93,34 @@ python -m ctrlaer_tools scan examples/adiabatic.py:experiment \
     --axes examples/adiabatic_scan.json --out-dir scan
 ```
 
-`module:function` also works. `--parameters` reads normal keyword arguments from
-a JSON file. `--n-pins`, `--freq` and `--clock-hz` match the controller setup.
-`--window-ms` bounds compilation of an infinite generator. Exact compiled JSON
-artifacts can be previewed directly and loaded for execution; they are saved
-output, not an alternative way to author experiments. Importing/running a Python
-experiment is explicit and can have ordinary Python side effects.
+`--parameters` reads function arguments from a JSON file. `--clock-hz`,
+`--freq` and `--n-pins` describe the intended controller. `--window-ms` limits
+the part of a repeating experiment to preview.
 
-## Experiment records
+## Save what you ran
+
+After an experiment, a record can keep the prepared signal, settings, output
+measurements and your own results together. For a finite run:
 
 ```python
 from ctrlaer_records import save_record, load_record
 
-# After run.wait() and capture.wait():
-save_record("shot.json", run.program, run=run, trace=trace,
-            results={"comparison": trace.compare(run.program)},
+# Run this after run.wait() has returned.
+save_record("experiment.json", run.program, run=run,
+            results={"sensor_reading": 18420},
             metadata={"sample": "A", "replicate": 1})
-record = load_record("shot.json")  # Load large records on the desktop.
+
+# You can also load the file later on your computer.
+record = load_record("experiment.json")
 ```
 
-A versioned record contains supplied named parameters, exact prepared words,
-captured words, device/MicroPython version and clock, execution status, observed
-effects/gates, result data and user metadata. Buffers use little-endian base64
-with SHA-256 checks; corrupt buffers and inconsistent executable metadata are
-rejected. Writing streams small chunks, then atomically renames the completed
-file. Offline records are explicitly labelled offline rather than inventing a
-device firmware version. Large records are best loaded on the desktop.
+If you [captured the output](digital-capture.md), add `trace=trace` to include
+the measurements. The record contains the exact output data and checksums,
+along with the board and MicroPython information when saved on the Pico.
+Save after output has stopped: writing a large file takes Python's time and
+could interrupt production of a buffered waveform.
 
-This example uses a finite prepared run, whose `run.program` contains all its
-words. A buffered run exposes a timing/output header instead. Analyse a separate
-finite window when recording a reference for an indefinite program, and label
-that window explicitly; it does not describe the unconsumed future.
-
-`Trace.timestamps` provides hardware-sampled relative input/output timestamps.
-Gate/print timestamps in runtime status are service observations, not precise
-hardware edge timestamps. CSV and VCD exports can accompany the combined record.
+A repeating experiment has no complete stored waveform. To save a reference
+for it, compile and record a finite window, and describe that window in your
+metadata. The reference covers that window, rather than future instructions
+the function has not produced yet.

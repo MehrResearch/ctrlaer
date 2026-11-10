@@ -1,5 +1,5 @@
 """Full 20 ms adiabatic pulse, captured on-chip at 8 MS/s on an idle Tiny 2040."""
-from ctrlaer import CtrlAer, chirp, compile_program, DigitalCapture, Trigger
+from ctrlaer import CtrlAer, sweep, compile_program, DigitalCapture, Trigger
 from machine import Pin
 from time import ticks_ms, ticks_diff
 import json, gc
@@ -8,7 +8,7 @@ controller = CtrlAer(0, 8, 1)
 capture = None
 try:
     def experiment():
-        yield chirp(90000,120000,sweep_ms=2),20
+        yield sweep(90000,120000,sweep_ms=2),20
     threshold = gc.threshold()
     started = ticks_ms()
     program = compile_program(experiment)

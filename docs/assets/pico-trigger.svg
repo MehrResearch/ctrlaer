@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 275" role="img">
+<title>Receive an external trigger</title>
+<rect width="100%" height="100%" rx="10" fill="#fff"/>
+<g font-family="system-ui, sans-serif" fill="#243247">
+<text x="24" y="32" font-size="23.400000000000002" fill="#243247" font-weight="600" text-anchor="start">Receive an external trigger</text>
+<rect x="28" y="72" width="245" height="149" rx="8" fill="#f1f5f9" stroke="#cad3df"/>
+<text x="46" y="101" font-size="22.1" fill="#243247" font-weight="600" text-anchor="start">Instrument</text>
+<text x="46" y="142" font-size="16.900000000000002" fill="#243247" font-weight="400" text-anchor="start">3.3 V trigger output</text>
+<text x="46" y="184" font-size="16.900000000000002" fill="#243247" font-weight="400" text-anchor="start">Signal GND</text>
+<rect x="627" y="72" width="245" height="149" rx="8" fill="#f1f5f9" stroke="#cad3df"/>
+<text x="645" y="101" font-size="22.1" fill="#243247" font-weight="600" text-anchor="start">Pico</text>
+<text x="645" y="142" font-size="16.900000000000002" fill="#243247" font-weight="400" text-anchor="start">GP6 input · pin 9</text>
+<text x="645" y="184" font-size="16.900000000000002" fill="#243247" font-weight="400" text-anchor="start">GND · pin 8</text>
+<path d="M273,137 L627,137" fill="none" stroke="#355cbb" stroke-width="2"/>
+<text x="450" y="125" font-size="18.2" fill="#243247" font-weight="400" text-anchor="middle">Trigger →</text>
+<path d="M273,179 L627,179" fill="none" stroke="#64748b" stroke-width="2"/>
+<text x="450" y="167" font-size="18.2" fill="#243247" font-weight="400" text-anchor="middle">Common ground</text>
+</g></svg>

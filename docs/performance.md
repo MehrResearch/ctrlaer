@@ -1,190 +1,241 @@
-# Startup and waveform production
+# Timing and performance
 
-CtrlAer has two distinct costs: preparing the waveform before starting, and
-producing more waveform data while a buffered run is active. A fast start alone
-does not establish that a producer can sustain continuous playback.
+The timing you need depends on the experiment. A valve that stays open for half
+a second is a different task from a 40 kHz ultrasonic drive signal. The examples
+below show complete programs for repeating experiments, followed by a short
+high-frequency sequence that runs once.
 
-## Install precompiled modules
+The diagrams show one cycle of each repeating experiment. The sizes are the
+output data needed to store that cycle, calculated at a 125 MHz system clock.
+They explain why holding a level costs little memory while storing every change
+of a square wave costs more. A buffered run reuses its storage as it repeats;
+its default waveform allocation is 96 KiB, regardless of total running time.
 
-Use `uv run tools/install.py` to install architecture-specific `.mpy` files.
-MicroPython can import these without parsing the Python source and compiling the
-native kernels on every soft reset. The native arithmetic is included in these
-files; no custom firmware is required.
+=== "Valve or lamp"
 
-Uploading `.py` copies alongside the installed `.mpy` files can make MicroPython
-load the source instead. The installer moves previous library files out of the
-import path and checks which files were actually imported before reporting
-success. See [installation](installation.md).
+    Keep an output HIGH for 500 ms, then LOW for 500 ms. This is a single on/off action, not a 500 ms train of pulses.
 
-## Measurements on the two development boards
+    ```python
+    from ctrlaer import CtrlAer, HIGH, OFF
+    from machine import Pin
 
-The following measurements were made on 10 November 2026 with MicroPython 1.29.0
-on a Pimoroni Tiny 2040 2MB, and Pimoroni MicroPython 1.29.0-2 on a Pico Plus 2.
-The clocks were 125 MHz and 150 MHz respectively; the Pico's heap included PSRAM.
-These are measurements of this workload, rather than a latency limit for
-arbitrary Python generators.
+    def experiment():
+        while True:
+            yield HIGH, 500
+            yield OFF, 500
 
-The cold workload emits a GPIO marker **before importing CtrlAer**, then starts
-a 90–120 kHz chirp, testing both 2 ms and default 20 ms sweep legs. The other
-board captures the marker and first waveform edge at 250 kS/s. Each measurement starts from a soft reset;
-the sender's CtrlAer modules have not already been imported. This includes
-imports, command construction, compilation, validation, PIO/DMA allocation and
-FIFO prefill. It excludes board boot, USB transport and external trigger waiting.
-Both boards' LEDs remain off during these measurements.
+    controller = CtrlAer(sm_number=0, base_pin=0, n_pins=1, freq=1000)
+    try:
+        controller.run(experiment())
+    finally:
+        controller.close()
+        Pin(0, Pin.OUT, value=0)
+    ```
 
-Finite and eager commands last 20 ms. The buffered command lasts 60 seconds,
-establishing that startup does not require compiling that entire duration; the
-test aborts it shortly after the first output. The figures measure **first
-output**, rather than the return of a blocking call that waits for its waveform.
+    ![Output timing](assets/valve.svg)
 
-| Sweep leg | Cold marker-to-first-output latency | Tiny 2040 | Pico Plus 2 |
-|---|---|---:|---:|
-| 2 ms | Finite prepared | 366 ms | 291 ms |
-| 2 ms | Buffered | 421 ms | 354 ms |
-| 2 ms | Eager | 415 ms | 351 ms |
-| 20 ms | Finite prepared | 387 ms | 304 ms |
-| 20 ms | Buffered | 442 ms | 367 ms |
-| 20 ms | Eager | 437 ms | 364 ms |
+    A stored copy of this one-second cycle takes **32 bytes**. Holding a level
+    for longer barely changes its storage cost. The program above uses `run()`
+    and repeats through its small hardware queue.
 
-All twelve observations are below 500 ms. They are observations of these
-workloads, not a universal bound on arbitrary generator construction or
-preparation. Precompiled modules remove source parsing/native compilation from
-cold startup. Deferred eager setup skips an empty fragment, and phase-aligned
-triangular chirps prepare only one sweep leg of their symmetric cache.
+=== "Camera trigger"
 
-### Raw kernel throughput
+    Give a camera a 1 ms HIGH trigger, then keep the output LOW for 99 ms. The camera’s exposure settings determine what it does in response.
 
-These separate warm measurements exclude the runtime and packet packing:
+    ```python
+    from ctrlaer import CtrlAer, HIGH, OFF
+    from machine import Pin
 
-| Measurement | Tiny 2040 | Pico Plus 2 |
-|---|---:|---:|
-| Warm 108.05 kHz pulse edge generation | 0.79 million edges/s | 1.31 million edges/s |
-| Warm repeating 90–120 kHz chirp edge generation | 0.83 million edges/s | 1.22 million edges/s |
-| Warm 90.001–120 kHz chirp edge generation | 0.35 million edges/s | 0.56 million edges/s |
+    def experiment():
+        while True:
+            yield HIGH, 1
+            yield OFF, 99
 
-The warm test reuses a 1024-word output array for 128 fills. It measures edge
-generation, **excluding packet packing, generator execution, refill scheduling
-and other application work**. A 90–120 kHz chirp needs 210,000 edges/s on average.
-Changing the lower frequency by 1 Hz prevents the short exact phase repeat, so
-the last row uses the inverse-phase lookup. Its native packet path also removes
-per-edge Python work. Raw edge throughput alone is insufficient: the sustained
-checks below include packing, refills, scheduling and garbage collection.
+    controller = CtrlAer(sm_number=0, base_pin=0, n_pins=1, freq=1000)
+    try:
+        controller.run(experiment())
+    finally:
+        controller.close()
+        Pin(0, Pin.OUT, value=0)
+    ```
 
-The exact chirp cache is enabled only when both frequency trajectory and
-accumulated carrier phase repeat after an integer number of system-clock ticks.
-It covers at most 10,000 edge intervals, independent of ON duration. Intervals
-use two bytes each, or a lossless one-byte delta from a fixed base when the
-interval range fits. A phase-aligned 50% chirp whose half cycles align at each
-reversal stores one sweep leg and reads its intervals backward for the return.
-The default 90–120 kHz command therefore retains 420 bytes with 2 ms legs, or
-4200 bytes with 20 ms legs. Other duty/phase/dead-time settings can require the
-full table, up to 20,000 bytes.
+    ![Output timing](assets/camera-trigger.svg)
 
-Non-repeating phase uses a bounded inverse-phase lookup rather than restarting
-an approximate carrier cycle. It stores two sweep-leg tables of Q4 clock times
-and preserves the full fractional carrier phase across reversals and chunks.
-The native lookup path reports a one-system-clock edge bound, tested against
-the independent analytic model. The 90.001–120 kHz example uses 6736 bytes with
-2 ms legs and 16,816 bytes with 20 ms legs; the maximum table is 32,784 bytes.
-Repeated buffered shots with unchanged settings reset and reuse the native
-cursor and its table, avoiding repeated setup arithmetic and allocations. Each
-new shot starts its own phase/sweep at zero. Pulse generation uses an
-integer/fractional timing accumulator. Unsupported native parameter ranges
-use the analytic compiler, preserving functionality with a higher cost.
+    A stored copy of one 100 ms cycle takes **32 bytes**. Use `mux()` to coordinate it with illumination, or add an input trigger if the sequence should start when another instrument is ready.
 
-## Reproduce the measurements
+=== "40 kHz ultrasound"
 
-Install this checkout first. To measure cold startup independently over the
-[GPIO6/GND link](wiring.md#two-boards-send-and-verify-in-either-direction):
+    Run a 40 kHz square wave for 2 ms, then pause for 8 ms. Each cycle lasts 25 µs, and there are 80 cycles in the active section.
 
-```sh
-python3 tools/start_latency.py \
-  --tiny-port /dev/cu.usbmodem3101 --pico-port /dev/cu.usbmodem101 \
-  --gpio 6 --mode all --sample-hz 250000 --out-dir work/start-latency
-```
+    ```python
+    from ctrlaer import CtrlAer, ON, OFF
+    from machine import Pin
 
-The tool stores JSON results and a VCD trace for each mode/direction. It reports
-both physical first-output latency and software timing. These measurements use
-4 µs samples; select `--sample-hz 1000000` for 1 µs resolution. Add `--sweep-ms 20`
-to test the default sweep. The two boards have independent clocks.
+    def experiment():
+        while True:
+            yield ON, 2
+            yield OFF, 8
 
-For the separate warm kernel benchmark, run the following from the repository
-root, substituting the serial port for the selected board:
+    controller = CtrlAer(sm_number=0, base_pin=0, n_pins=1, freq=40_000)
+    try:
+        controller.run(experiment())
+    finally:
+        controller.close()
+        Pin(0, Pin.OUT, value=0)
+    ```
 
-```sh
-python3 tools/board.py --port /dev/cu.usbmodem3101 tests/hardware/production_rate.py
-```
+    ![Output timing](assets/ultrasound.svg)
 
-The script soft-resets the selected board, emits the test waveform on GPIO8, and
-returns GPIO8 to an input. It needs no external wiring. The JSON output includes
-the clock, board identity, cold latency, first-fill cost, warm throughput and
-retained heap growth after garbage collection. Small retained-allocation changes
-include the measurement's own Python bookkeeping; this is not a heap leak test.
+    The program repeats one compact `ON` instruction and one `OFF` instruction.
+    Its queue stays small however long it runs. A stored copy of one complete
+    cycle would take **1,304 bytes**, about 1.3 KiB, because preparation records
+    each output change.
 
-To check waveform accuracy independently, connect GPIO6 between two boards and
-connect their grounds. Then run:
+=== "100 kHz atomiser"
 
-```sh
-python3 tools/cross_board.py \
-  --tiny-port /dev/cu.usbmodem3101 \
-  --pico-port /dev/cu.usbmodem101 --gpio 6 --no-leds --out-dir work/cross-board
-```
+    Run a 100 kHz square wave for 20 ms, with each cycle HIGH for 4 µs and LOW
+    for 6 µs, then pause for 20 ms. There are 2,000 cycles in the active section.
+    `duty=0.4` selects the 40% HIGH time.
 
-The generic-chirp check adds `--start-hz 90001`. It observed 2338 expected rises
-per direction, including the start marker, with zero mismatches. Host and device
-produced identical packed programs. After fitting the independent clocks (about
-9 ppm apart), maximum residuals were 50/52 ns at 10 MS/s capture.
+    ```python
+    from ctrlaer import CtrlAer, square_wave, OFF
 
-With `--mode buffered --chirp-ms 100 --sample-hz 4000000`, the generic chirp
-produced 21,476 transitions per direction, with zero mismatches and 127/128 ns
-maximum fitted residuals. Adding `--sweep-ms 20` while keeping the default
-90–120 kHz frequencies checks the compact symmetric cache: 21,474 transitions,
-zero mismatches, 127/128 ns residuals. These fits check waveform shape and
-scheduling; they do not assert a shared clock.
+    def experiment():
+        while True:
+            yield square_wave(freq=100_000, duty=0.4), 20
+            yield OFF, 20
 
-## Sustained buffered production
+    controller = CtrlAer(sm_number=0, base_pin=0, n_pins=1, freq=1000)
+    try:
+        run = controller.prepare(experiment, mode="buffered")
+        run.start().wait()
+    finally:
+        controller.close()
+    ```
 
-The chained-DMA runtime was exercised on both boards with these workloads:
+    ![Output timing](assets/atomiser.svg)
 
-| Workload | Duration per board | Result |
-|---|---:|---|
-| Continuous 108.05 kHz pulse, one long yielded command | At least 30 s | No underrun |
-| Continuous 90–120 kHz chirp, 2 ms per leg, one long command | At least 30 s | No underrun |
-| Repeated 20 ms 108.05 kHz bursts / 20 ms OFF | At least 30 s | No underrun |
-| Repeated 20 ms 90–120 kHz chirps / 20 ms OFF | At least 30 s | No underrun |
-| Continuous 90–120 kHz chirp, default 20 ms leg | At least 30 s | No underrun |
-| Continuous 90.001–120 kHz chirp, 2 ms leg | At least 30 s | No underrun |
-| Repeated 20 ms 90.001–120 kHz chirps / 20 ms OFF | At least 30 s | No underrun |
+    One complete cycle takes **32,016 bytes**, about 31.3 KiB, when prepared
+    in advance. The buffered program above reuses its storage as it repeats.
+    It uses the default 96 KiB waveform allocation; Python must keep preparing
+    new sections while the output runs.
 
-Each workload crosses thousands of buffer boundaries. The long commands cross
-the native cursor's local-coordinate rollover and Python's small-integer range.
-Collections remain enabled. Scheduling collection earlier, shortly after a
-fresh DMA handoff, avoids an additional automatic collection in the middle of
-burst production on the Tiny. Stable cached/lookup commands collect less
-frequently than burst boundaries, where generator advances and validation
-create more garbage. The default pool is 96 KiB, with four transmit DMA
-channels and a prepared spare. Dense pulses, cached chirps and generic lookup
-chirps each use a direct native packet writer. Sparse chunks transfer their
-actual word counts without full-buffer padding.
-The default pool's unused alignment space holds the compiler's edge scratch
-and two disjoint event-receive rings, leaving more of the Tiny's heap available
-for the application and capture. Hardware checks verify that these regions do
-not overlap any transmit ring or each other.
+=== "Frequency sweep"
 
-`tests/hardware/buffered_stress.py` reproduces all seven workloads for thirty
-seconds each. Allow about four minutes and pass `--timeout 300` to
-`tools/board.py`. Change `SOAK_SECONDS` for a different duration. Use the same
-`tools/board.py --port ...` command form as the kernel benchmark.
-It reads heap statistics only after stopping output. Separate lifecycle checks
-cover gate timeouts, repeated triggers, abort/rearm, final masks and deliberately
-slow producers; an intentional deadline miss must raise `UnderrunError`.
+    Sweep from 90 to 120 kHz in 2 ms, return in another 2 ms, and repeat for a total of 20 ms. Follow it with a 100 ms pause.
 
-These results establish sustained production for the listed workloads. Generic
-chirps and general rich `mux()` merges use more computation, and a producer
-that blocks Python for too long can still underrun. Increasing buffering absorbs
-pauses but does not repair an insufficient average production rate. Use finite
-preparation for a reviewable schedule that fits memory, or eager execution when
-Python gaps between commands are acceptable. See [execution modes](execution-modes.md).
+    ```python
+    from ctrlaer import CtrlAer, sweep, OFF
 
-The full measurements, runtime snapshots and installed-source hashes are saved
-in `tests/hardware/validation-2026-11-10.json` in this checkout.
+    def experiment():
+        while True:
+            yield sweep(90_000, 120_000, sweep_ms=2), 20
+            yield OFF, 100
+
+    controller = CtrlAer(sm_number=0, base_pin=0, n_pins=1, freq=1000)
+    try:
+        run = controller.prepare(experiment, mode="buffered")
+        run.start().wait()
+    finally:
+        controller.close()
+    ```
+
+    ![Output timing](assets/sweep-envelope.svg)
+
+    The complete sequence needs **33,616 bytes**, about 32.8 KiB. A longer active section continues the same up-and-down frequency pattern. Buffered output keeps only a few sections ahead, so memory does not grow with total duration.
+
+=== "Short 500 kHz signal"
+
+    Produce 500 cycles in 1 ms, then hold LOW for 1 ms. The period is 2 µs, with one microsecond HIGH and one LOW.
+
+    ```python
+    from ctrlaer import CtrlAer, square_wave, OFF
+
+    def experiment():
+        yield square_wave(freq=500_000), 1
+        yield OFF, 1
+
+    controller = CtrlAer(sm_number=0, base_pin=0, n_pins=1, freq=1000)
+    try:
+        controller.prepare(experiment()).start().wait(timeout_ms=1000)
+    finally:
+        controller.close()
+    ```
+
+    ![Output timing](assets/fast-signal.svg)
+
+    The two-millisecond sequence needs **8,016 bytes**, about 7.8 KiB. Preparing a short signal avoids having to generate it continuously in Python. The program prepares this whole short signal before starting it. Continuous
+    buffered operation at 500 kHz has not been measured.
+
+The first five programs continue until you stop them. At the MicroPython REPL,
+press **Ctrl-C**; each program's `finally` block stops output and leaves GP0 LOW.
+The last example stops after its two-millisecond sequence.
+
+Connect GP0 to the device's 3.3 V-compatible control input and join its ground to
+Pico GND. The [first tutorial](getting-started.md) uses the built-in LED and
+also shows an external-LED circuit for trying a slow signal on GP0. To inspect
+individual square-wave cycles, use [digital capture](digital-capture.md) or an
+oscilloscope.
+
+## Timing resolution
+
+Prepared and buffered output changes occur on the Pico's system clock. At
+125 MHz one clock tick is 8 ns, and the state machine requires at least six ticks
+between changes: 48 ns. At 150 MHz the corresponding interval is 40 ns.
+The compiler rejects requested intervals that are too short.
+
+The original `ON` command uses a repeating hardware loop and a frequency divider.
+Its actual frequency can differ slightly from the request. Durations for integer
+commands are whole periods of the controller's `freq`; for example, at 40 kHz
+one period is 25 µs. `square_wave()` and `sweep()` instead round their changes to
+system-clock ticks. The prepared program's summary reports that rounding.
+
+Input synchronisation and trigger-control instructions add a fixed delay after
+an external trigger. [Triggers](triggers-and-groups.md) explains that delay.
+Console messages and software timeouts also depend on when Python handles them;
+use [digital capture](digital-capture.md) to measure pin timing.
+
+## Repeating a signal continuously
+
+A buffered square wave needs two output changes per cycle. At 40 kHz that is
+80,000 changes per second; at 100 kHz it is 200,000. This is what a benchmark
+means by “edges per second”. The useful question is whether the **whole running
+program** can prepare those changes quickly enough, including its sensor reads,
+messages and other work.
+
+More buffer memory gives Python more time to recover from a pause. It cannot
+make up for a function that is consistently too slow. If preparation falls
+behind, CtrlAer stops and reports `UnderrunError`. For a known short sequence,
+preparing all of it first removes that ongoing Python workload. For measurements
+between actions, [eager execution](execution-modes.md#eager-measurements-and-ordinary-python-in-sequence)
+allows variable gaps while Python works.
+
+## What has been measured?
+
+The sustained tests focused on roughly 100 kHz because that is the operating
+range of the vibrating-mesh atomisers used in the lab. They cover fixed-frequency
+square waves, sweeps and repeated on/off operation. They do not determine a
+maximum rate for every possible experiment.
+
+| Workload | Recorded continuous test |
+|---|---|
+| 108.05 kHz square wave | At least 30 s on each chip, without a buffer underrun |
+| 90–120 kHz sweep, 2 ms or 20 ms per direction | At least 30 s on each chip, without a buffer underrun |
+| 90.001–120 kHz sweep, 2 ms per direction | At least 30 s on each chip, without a buffer underrun |
+| Repeated 20 ms square waves or sweeps, with 20 ms LOW between them | At least 30 s on each chip, without a buffer underrun |
+
+The records are from 10 November 2026: an RP2040 at 125 MHz (Pimoroni Tiny 2040,
+MicroPython 1.29.0) and an RP2350 at 150 MHz (Pimoroni Pico Plus 2, firmware
+1.29.0-2 with PSRAM). They are historical measurements of the recorded source
+versions. The detailed results, firmware identities and source hashes are in
+the checkout's `tests/hardware/validation-2026-11-10.json`.
+
+For the 90–120 kHz sweep with 2 ms per direction, the recorded time from a fresh
+import to first output was about 366 ms on RP2040 and 291 ms on RP2350 for a
+finite prepared run, or 421 ms and 354 ms with buffering. This is preparation
+time before the experiment, separate from the timing of its output.
+
+Install the compiled library with the [installer](installation.md) to avoid
+recompiling its native routines on every restart. Then try your actual waveform
+and application workload: it is more useful than comparing isolated arithmetic
+benchmark rates.
